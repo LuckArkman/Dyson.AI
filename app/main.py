@@ -1,16 +1,28 @@
-# This is a sample Python script.
+import os
+import sqlite3
+from database_manager import init_db, get_db_connection
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+def main():
+    print("ZeroRAM-GEN: Iniciando Sprint 01")
+    
+    # 1. Inicializar o Banco de Dados
+    init_db()
+    
+    # 2. Validar Estrutura do Vocabulário
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) FROM vocab")
+        count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT * FROM vocab LIMIT 5")
+        rows = cursor.fetchall()
 
+    print(f"Total de tokens no vocabulário atual: {count}")
+    print("Primeiros 5 tokens:")
+    for row in rows:
+        print(f" ID: {row[0]} | TEXT: '{row[1]}'")
+        
+    print("\nSprint 01 Concluída com Sucesso: Ambiente Validado e Vocabulário SQLite Pronto.")
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+if __name__ == "__main__":
+    main()
