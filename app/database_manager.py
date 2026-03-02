@@ -65,5 +65,26 @@ def create_index_on_text():
         conn.commit()
     print("Índice idx_vocab_text criado/validado.")
 
+# Cache simples em memória para os IDs mais frequentes (Otimização da Sprint 4)
+ID_TO_TEXT_CACHE = {}
+MAX_CACHE_SIZE = 5000
+
+def get_text_by_id(token_id):
+    """Retorna o texto original correspondente a um ID no banco."""
+    if token_id in ID_TO_TEXT_CACHE:
+        return ID_TO_TEXT_CACHE[token_id]
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT text FROM vocab WHERE id = ?", (token_id,))
+        row = cursor.fetchone()
+        if row:
+            text = row[0]
+            # Gerenciamento simples de cache
+            if len(ID_TO_TEXT_CACHE) < MAX_CACHE_SIZE:
+                ID_TO_TEXT_CACHE[token_id] = text
+            return text
+        return "<UNK>" # Token desconhecido
+
 if __name__ == "__main__":
     init_db()

@@ -29,6 +29,15 @@ def tokenize_line(line):
         return []
     return normalized.split(" ")
 
+def decode_sequence(token_ids):
+    """Converte uma lista de IDs em uma frase humana legível."""
+    from database_manager import get_text_by_id
+    decoded_tokens = [get_text_by_id(tid) for tid in token_ids]
+    # Reconstruir frase, removendo espaços extras ao redor da pontuação
+    text = " ".join(decoded_tokens)
+    text = re.sub(r"\s+([\.\!\?\-\,])", r"\1", text)
+    return text
+
 if __name__ == "__main__":
     # Teste rápido
     sample = "Oi! Tudo bem? Vamos testar o ZeroRAM-GEN."
