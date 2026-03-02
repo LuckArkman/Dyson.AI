@@ -36,5 +36,34 @@ def init_db():
         conn.commit()
     print(f"Banco de Dados Inicializado em: {DB_PATH}")
 
+def get_or_create_id(word):
+    """Retorna o ID de uma palavra ou cria um novo registro se não existir."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM vocab WHERE text = ?", (word,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        else:
+            cursor.execute("INSERT INTO vocab (text) VALUES (?)", (word,))
+            conn.commit()
+            return cursor.lastrowid
+
+def bulk_insert_vocab(words):
+    """Insere uma lista de palavras únicas no banco de forma eficiente."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Usamos INSERT OR IGNORE para evitar erros de duplicidade
+        cursor.executemany("INSERT OR IGNORE INTO vocab (text) VALUES (?)", [(w,) for w in words])
+        conn.commit()
+
+def create_index_on_text():
+    """Cria índice na coluna 'text' para acelerar buscas durante o treino."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_vocab_text ON vocab (text)")
+        conn.commit()
+    print("Índice idx_vocab_text criado/validado.")
+
 if __name__ == "__main__":
     init_db()
