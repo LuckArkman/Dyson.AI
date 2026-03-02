@@ -60,3 +60,35 @@ def dispose_tensor(tensor_obj):
     # Nota: Em Python, del remove a referência. O GC limpa o espaço.
     del tensor_obj
     gc.collect()
+
+def ensure_v0_weights():
+    """Garante que os pesos iniciais existem (Tarefa da Sprint 05)."""
+    if not os.path.exists(WEIGHTS_DIR) or len(os.listdir(WEIGHTS_DIR)) <= 1:
+        print("\n[!] Pesos não encontrados. Reinicializando (Sprint 05)...")
+        from database_manager import get_db_connection
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT count(*) FROM vocab")
+            vocab_size = cursor.fetchone()[0]
+        
+        embed_dim = 128
+        hidden_dim = 256
+        layers_metadata = {}
+        
+        # Camada 01: Embeddings
+        path, shape = initialize_layer_weights((vocab_size, embed_dim), "embedding_matrix", "xavier")
+        layers_metadata["embedding_matrix"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+        
+        # Camada 02: Hidden 01
+        path, shape = initialize_layer_weights((embed_dim, hidden_dim), "hidden_01_weights", "xavier")
+        layers_metadata["hidden_01_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+        
+        path, shape = initialize_layer_weights((hidden_dim,), "hidden_01_bias", "zeros")
+        layers_metadata["hidden_01_bias"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+        
+        # Camada 03: Output
+        path, shape = initialize_layer_weights((hidden_dim, vocab_size), "output_weights", "xavier")
+        layers_metadata["output_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+        
+        create_weight_registry(layers_metadata)
+        print("[OK] Pesos reinicializados.")

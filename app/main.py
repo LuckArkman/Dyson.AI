@@ -1,86 +1,72 @@
 import os
 import psutil
-from database_manager import get_or_create_id, get_db_connection
-from tensor_manager import initialize_layer_weights, create_weight_registry, load_tensor_mmap, dispose_tensor, WEIGHTS_DIR
+from database_manager import get_or_create_id
+from tensor_manager import ensure_v0_weights, dispose_tensor
+from engine import embedding_lookup, dense_layer_forward, apply_activation
 
 def get_ram_usage():
     """Retorna o uso atual de RAM em MB."""
     process = psutil.Process(os.getpid())
     return process.memory_info().rss / (1024 * 1024)
 
-def ensure_v0_weights():
-    """Garante que os pesos iniciais existem (Tarefa da Sprint 05)."""
-    if not os.path.exists(WEIGHTS_DIR) or len(os.listdir(WEIGHTS_DIR)) <= 1:
-        print("\n[!] Pesos não encontrados. Reinicializando (Sprint 05)...")
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT count(*) FROM vocab")
-            vocab_size = cursor.fetchone()[0]
-        
-        embed_dim = 128
-        hidden_dim = 256
-        layers_metadata = {}
-        
-        # Camada 01: Embeddings
-        path, shape = initialize_layer_weights((vocab_size, embed_dim), "embedding_matrix", "xavier")
-        layers_metadata["embedding_matrix"] = {"path": path, "shape": list(shape), "dtype": "float32"}
-        
-        # Camada 02: Hidden 01
-        path, shape = initialize_layer_weights((embed_dim, hidden_dim), "hidden_01_weights", "xavier")
-        layers_metadata["hidden_01_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
-        
-        path, shape = initialize_layer_weights((hidden_dim,), "hidden_01_bias", "zeros")
-        layers_metadata["hidden_01_bias"] = {"path": path, "shape": list(shape), "dtype": "float32"}
-        
-        # Camada 03: Output
-        path, shape = initialize_layer_weights((hidden_dim, vocab_size), "output_weights", "xavier")
-        layers_metadata["output_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
-        
-        create_weight_registry(layers_metadata)
-        print("[OK] Pesos reinicializados.")
-
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 06 (Loading On-Demand)")
+    print("ZeroRAM-GEN: Iniciando Sprint 07 (Motor Matemático Forward)")
     
     # 0. Garantir existência dos pesos
     ensure_v0_weights()
     
-    # 1. Medir RAM Inicial
+    # 1. Preparar entrada (Prompt)
+    frase_original = "Olá! Como você está?"
+    print(f"\nPrompt: '{frase_original}'")
+    
+    # Tokenizar e converter para IDs
+    tokens = ["olá", "!", "como", "você", "está", "?"]
+    token_ids = [get_or_create_id(t) for t in tokens]
+    print(f"Token IDs: {token_ids}")
+    
+    # Medir RAM Inicial
     initial_ram = get_ram_usage()
-    print(f"\nRAM Inicial: {initial_ram:.2f} MB")
+    print(f"RAM Inicial: {initial_ram:.2f} MB")
     
-    # 2. Carregar Matriz de Embeddings via MMap (Aprox. 123MB em disco)
-    print("Carregando Matriz de Embeddings em modo MMap...")
-    embed_mmap = load_tensor_mmap("embedding_matrix")
+    # 2. Etapa 01: Embedding Lookup (Mapeamento de IDs para Vetores)
+    print("\n[Forward Step 01] Embedding Lookup...")
+    embeddings = embedding_lookup(token_ids)
+    print(f" Shape Embeddings: {embeddings.shape}")
+    print(f" RAM: {get_ram_usage():.2f} MB (Delta: {get_ram_usage()-initial_ram:.2f} MB)")
     
-    # A RAM não deve ter aumentado proporcionalmente aos 123MB do arquivo
-    ram_after_mmap = get_ram_usage()
-    print(f"Matriz Aberta via MMap. RAM atual: {ram_after_mmap:.2f} MB")
-    print(f"Delta RAM (MMap): {ram_after_mmap - initial_ram:.2f} MB")
+    # 3. Etapa 02: Hidden Layer 01 (Dense Pass)
+    print("\n[Forward Step 02] Hidden Layer (Dense + ReLU)...")
+    hidden_output = dense_layer_forward(
+        embeddings, 
+        "hidden_01_weights", 
+        "hidden_01_bias", 
+        activation='relu'
+    )
+    print(f" Shape Hidden: {hidden_output.shape}")
+    print(f" RAM: {get_ram_usage():.2f} MB")
     
-    # 3. Acessar uma "Fatia" (Slicing) - Zero RAM residente
-    token = 'olá'
-    token_id = get_or_create_id(token)
+    # 4. Etapa 03: Output Layer (Logits para Vocab)
+    print("\n[Forward Step 03] Output Layer (Final Logits)...")
+    logits = dense_layer_forward(
+        hidden_output, 
+        "output_weights", 
+        bias_name=None, # Sem bias na output nesta V0
+        activation='softmax_ready' # Deixa linear para Softmax posterior
+    )
+    print(f" Shape Logits: {logits.shape}")
+    print(f" RAM Final: {get_ram_usage():.2f} MB")
     
-    print(f"\nAcessando vetor do token '{token}' (ID: {token_id})...")
-    # O Slicing no NumPy mmap não carrega a matriz toda para a RAM
-    vector_slice = embed_mmap[token_id] 
+    # 5. Finalização
+    print("\nValidando Resultados:")
+    print(f" - Primeiro Logit do Primeiro Token: {logits[0][0]:.6f}")
     
-    print(f"Vetor (Início): {vector_slice[:5]} [...]")
+    # Limpeza total
+    dispose_tensor(embeddings)
+    dispose_tensor(hidden_output)
+    dispose_tensor(logits)
     
-    # RAM após ler o slice
-    ram_after_slice = get_ram_usage()
-    print(f"RAM após ler slice: {ram_after_slice:.2f} MB")
-    
-    # 4. Liberar Memória
-    print("\nDescartando tensores e forçando limpeza...")
-    dispose_tensor(embed_mmap)
-    dispose_tensor(vector_slice)
-    
-    final_ram = get_ram_usage()
-    print(f"RAM Final: {final_ram:.2f} MB")
-    
-    print("\nSprint 06 Concluída com Sucesso: Mecanismo MMap validado.")
+    print(f"RAM após descarte: {get_ram_usage():.2f} MB")
+    print("\nSprint 07 Concluída com Sucesso: Motor Matemático Forward operando em disco.")
 
 if __name__ == "__main__":
     main()
