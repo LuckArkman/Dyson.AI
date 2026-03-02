@@ -64,3 +64,21 @@ def dense_layer_forward(input_tensor, weights_name, bias_name=None, activation='
     dispose_tensor(weights)
     
     return output
+
+def compute_softmax(logits):
+    """Transforma logits (pesos brutos) em probabilidades (0 a 1)."""
+    # Subtrair o máximo para estabilidade numérica (evita overflow)
+    exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
+    return exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+
+def calculate_loss(probabilities, target_ids):
+    """
+    Calcula Cross Entropy Loss.
+    probabilities: Shape (seq_len, vocab_size)
+    target_ids: Lista de IDs reais que deveriam ocorrer.
+    """
+    batch_size = len(target_ids)
+    # Selecionar apenas a probabilidade atribuída ao token correto
+    # probabilities[range(batch_size), target_ids] pega prob[i][target_id[i]]
+    correct_log_probs = -np.log(probabilities[range(batch_size), target_ids] + 1e-10)
+    return np.mean(correct_log_probs)

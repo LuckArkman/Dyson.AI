@@ -31,6 +31,14 @@ def init_db():
                 text TEXT NOT NULL UNIQUE
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS train_log (
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                epoch INTEGER,
+                step INTEGER,
+                loss REAL
+            )
+        ''')
         # Inserir token <PAD> se não existir
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         conn.commit()
@@ -85,6 +93,16 @@ def get_text_by_id(token_id):
                 ID_TO_TEXT_CACHE[token_id] = text
             return text
         return "<UNK>" # Token desconhecido
+
+def log_training_metrics(epoch, step, loss):
+    """Grava métricas de treinamento no SQLite."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO train_log (epoch, step, loss) VALUES (?, ?, ?)",
+            (epoch, int(step), float(loss))
+        )
+        conn.commit()
 
 if __name__ == "__main__":
     init_db()

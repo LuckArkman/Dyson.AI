@@ -1,72 +1,56 @@
 import os
-import psutil
-from database_manager import get_or_create_id
+import numpy as np
+from database_manager import init_db, get_or_create_id, log_training_metrics, get_db_connection
 from tensor_manager import ensure_v0_weights, dispose_tensor
-from engine import embedding_lookup, dense_layer_forward, apply_activation
-
-def get_ram_usage():
-    """Retorna o uso atual de RAM em MB."""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 * 1024)
+from engine import embedding_lookup, dense_layer_forward, compute_softmax, calculate_loss
 
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 07 (Motor Matemático Forward)")
+    print("ZeroRAM-GEN: Iniciando Sprint 08 (Funções de Perda e Log)")
     
-    # 0. Garantir existência dos pesos
+    # 0. Garantir existência das Tabelas e Pesos
+    init_db()
     ensure_v0_weights()
     
-    # 1. Preparar entrada (Prompt)
-    frase_original = "Olá! Como você está?"
-    print(f"\nPrompt: '{frase_original}'")
+    # 1. Definir entrada e Alvo (Target) para treino simulado
+    tokens_input = ["olá", "!", "como", "você"]
+    target_tokens = ["você", "está", "hoje", "?"] # Próximos tokens esperados
     
-    # Tokenizar e converter para IDs
-    tokens = ["olá", "!", "como", "você", "está", "?"]
-    token_ids = [get_or_create_id(t) for t in tokens]
-    print(f"Token IDs: {token_ids}")
+    input_ids = [get_or_create_id(t) for t in tokens_input]
+    target_ids = [get_or_create_id(t) for t in target_tokens]
     
-    # Medir RAM Inicial
-    initial_ram = get_ram_usage()
-    print(f"RAM Inicial: {initial_ram:.2f} MB")
+    print(f"Sequence Input: {tokens_input}")
+    print(f"Target IDs: {target_ids}")
     
-    # 2. Etapa 01: Embedding Lookup (Mapeamento de IDs para Vetores)
-    print("\n[Forward Step 01] Embedding Lookup...")
-    embeddings = embedding_lookup(token_ids)
-    print(f" Shape Embeddings: {embeddings.shape}")
-    print(f" RAM: {get_ram_usage():.2f} MB (Delta: {get_ram_usage()-initial_ram:.2f} MB)")
+    # 2. Forward Pass Completo (Zero RAM)
+    emb = embedding_lookup(input_ids)
+    h1 = dense_layer_forward(emb, "hidden_01_weights", "hidden_01_bias", activation='relu')
+    logits = dense_layer_forward(h1, "output_weights", activation='linear')
     
-    # 3. Etapa 02: Hidden Layer 01 (Dense Pass)
-    print("\n[Forward Step 02] Hidden Layer (Dense + ReLU)...")
-    hidden_output = dense_layer_forward(
-        embeddings, 
-        "hidden_01_weights", 
-        "hidden_01_bias", 
-        activation='relu'
-    )
-    print(f" Shape Hidden: {hidden_output.shape}")
-    print(f" RAM: {get_ram_usage():.2f} MB")
+    # 3. Softmax & Loss (Sprint 08)
+    print("\nCalculando Softmax e Loss...")
+    probs = compute_softmax(logits)
+    loss = calculate_loss(probs, target_ids)
     
-    # 4. Etapa 03: Output Layer (Logits para Vocab)
-    print("\n[Forward Step 03] Output Layer (Final Logits)...")
-    logits = dense_layer_forward(
-        hidden_output, 
-        "output_weights", 
-        bias_name=None, # Sem bias na output nesta V0
-        activation='softmax_ready' # Deixa linear para Softmax posterior
-    )
-    print(f" Shape Logits: {logits.shape}")
-    print(f" RAM Final: {get_ram_usage():.2f} MB")
+    print(f"Loss Calculada: {loss:.6f}")
     
-    # 5. Finalização
-    print("\nValidando Resultados:")
-    print(f" - Primeiro Logit do Primeiro Token: {logits[0][0]:.6f}")
+    # 4. Logging no SQLite (Sprint 08)
+    print("Gravando métricas no SQLite...")
+    log_training_metrics(epoch=0, step=1, loss=loss)
     
-    # Limpeza total
-    dispose_tensor(embeddings)
-    dispose_tensor(hidden_output)
-    dispose_tensor(logits)
-    
-    print(f"RAM após descarte: {get_ram_usage():.2f} MB")
-    print("\nSprint 07 Concluída com Sucesso: Motor Matemático Forward operando em disco.")
+    # 5. Validação do Log
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM train_log ORDER BY timestamp DESC LIMIT 1")
+        last_log = cursor.fetchone()
+        
+    print("\nValidação do Log no Banco:")
+    print(f" - Timestamp: {last_log[0]}")
+    print(f" - Epoch: {last_log[1]} | Step: {last_log[2]} | Loss: {last_log[3]:.6f}")
+
+    # Limpeza
+    dispose_tensor(emb); dispose_tensor(h1); dispose_tensor(logits)
+
+    print("\nSprint 08 Concluída com Sucesso: Função de Perda e Subsistema de Log validados.")
 
 if __name__ == "__main__":
     main()
