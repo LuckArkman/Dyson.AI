@@ -61,6 +61,21 @@ def dispose_tensor(tensor_obj):
     del tensor_obj
     gc.collect()
 
+def store_tensor_disk(name, tensor, folder='temp'):
+    """Salva um tensor temporário (gradiente ou ativação) no disco."""
+    path = os.path.join(WEIGHTS_DIR, folder)
+    os.makedirs(path, exist_ok=True)
+    file_path = os.path.join(path, f"{name}.npy")
+    np.save(file_path, tensor)
+    return file_path
+
+def load_tensor_disk(name, folder='temp'):
+    """Carrega um tensor temporário do disco."""
+    file_path = os.path.join(WEIGHTS_DIR, folder, f"{name}.npy")
+    if not os.path.exists(file_path):
+        return None
+    return np.load(file_path)
+
 def ensure_v0_weights():
     """Garante que os pesos iniciais existem (Tarefa da Sprint 05)."""
     if not os.path.exists(WEIGHTS_DIR) or len(os.listdir(WEIGHTS_DIR)) <= 1:

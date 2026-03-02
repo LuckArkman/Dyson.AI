@@ -13,6 +13,10 @@ def relu6(x):
     """Função de Ativação ReLU6 (limitada a 6)."""
     return np.minimum(np.maximum(0, x), 6)
 
+def d_relu(x):
+    """Derivada da ReLU."""
+    return (x > 0).astype(np.float32)
+
 def apply_activation(tensor, act_type='relu'):
     """Aplica a função de ativação especificada a um tensor."""
     if act_type == 'relu':
@@ -77,8 +81,46 @@ def calculate_loss(probabilities, target_ids):
     probabilities: Shape (seq_len, vocab_size)
     target_ids: Lista de IDs reais que deveriam ocorrer.
     """
+    # correct_log_probs = -np.log(probabilities[range(batch_size), target_ids] + 1e-10)
+    # return np.mean(correct_log_probs)
+    # Melhorado para evitar indexação direta em matrizes gigantes se necessário
+    # mas por enquanto mantemos a lógica da Sprint 08
     batch_size = len(target_ids)
-    # Selecionar apenas a probabilidade atribuída ao token correto
-    # probabilities[range(batch_size), target_ids] pega prob[i][target_id[i]]
-    correct_log_probs = -np.log(probabilities[range(batch_size), target_ids] + 1e-10)
-    return np.mean(correct_log_probs)
+    selected_probs = probabilities[range(batch_size), target_ids]
+    return -np.mean(np.log(selected_probs + 1e-10))
+
+def compute_output_gradient(probabilities, target_ids):
+    """
+    Calcula o gradiente inicial (dL/dz) para Softmax + CrossEntropy.
+    Retorno: Shape (seq_len, vocab_size)
+    """
+    grad = probabilities.copy()
+    batch_size = len(target_ids)
+    # dL/dz = P - Y (onde Y é one-hot)
+    grad[range(batch_size), target_ids] -= 1
+    grad = grad / batch_size
+    return grad
+
+def backward_layer_step(grad_out, weights_name, forward_input, activation='relu'):
+    """
+    Calcula gradientes para pesos e para a entrada da camada (retropropagação).
+    """
+    from tensor_manager import load_tensor_mmap, dispose_tensor
+    
+    # Se houver ativação, aplicar derivada (Assumindo que grad_out já é dL/dy)
+    # Nota: No ZeroRAM, o 'z' (XW+b) deve ser recarregado se a derivada depender dele.
+    # Para ReLU, se forward_input for a saída da camada anterior e weights forem W,
+    # então output_z = dot(forward_input, W). 
+    # Simplificação: grad_out já chega como gradiente em relação a Z se for a última camada.
+    
+    weights = load_tensor_mmap(weights_name)
+    
+    # dL/dW = X.T @ grad_out
+    grad_w = np.dot(forward_input.T, grad_out)
+    
+    # dL/dX = grad_out @ W.T
+    grad_x = np.dot(grad_out, weights.T)
+    
+    dispose_tensor(weights)
+    
+    return grad_w, grad_x
