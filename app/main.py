@@ -1,46 +1,68 @@
 import os
-from database_manager import get_or_create_id, get_text_by_id
-from tokenizer import tokenize_line, decode_sequence
+import json
+import numpy as np
+from database_manager import get_db_connection
+from tensor_manager import initialize_layer_weights, create_weight_registry, WEIGHTS_DIR
 
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 04")
+    print("ZeroRAM-GEN: Iniciando Sprint 05")
     
-    # 1. Testar Serialização (Texto -> ID)
-    frase_original = "Oi! Como você está?"
-    tokens = tokenize_line(frase_original)
+    # 1. Definir Dimensões do Modelo (V0)
+    # Vocabulário: ~252k tokens (obtido via database_manager)
+    # Embeddings: 128 (pequeno para ZeroRAM)
+    # Hidden Layers: 256
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) FROM vocab")
+        vocab_size = cursor.fetchone()[0]
     
-    # Converter cada token em ID (Muitos já existem no banco da Sprint 03)
-    ids = []
-    print(f"Serializando: '{frase_original}'")
-    for t in tokens:
-        tid = get_or_create_id(t)
-        ids.append(tid)
-        print(f" Token: '{t}' -> ID: {tid}")
+    embed_dim = 128
+    hidden_dim = 256
+    
+    print(f"Dimensões do Modelo V0:")
+    print(f"- Vocabulário: {vocab_size}")
+    print(f"- Dimensão de Embedding: {embed_dim}")
+    print(f"- Dimensão de Hidden: {hidden_dim}")
+    
+    # 2. Inicializar Camadas e Pesos em Disco (Arquitetura ZeroRAM)
+    layers_metadata = {}
+    
+    # Camada 01: Embeddings (Matriz gigante)
+    print("\nInicializando Embeddings...")
+    embed_shape = (vocab_size, embed_dim)
+    path, shape = initialize_layer_weights(embed_shape, "embedding_matrix", "xavier")
+    layers_metadata["embedding_matrix"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    
+    # Camada 02: Hidden 01 (Weights + Bias)
+    print("Inicializando Hidden Layer 01...")
+    h1_shape = (embed_dim, hidden_dim)
+    path, shape = initialize_layer_weights(h1_shape, "hidden_01_weights", "xavier")
+    layers_metadata["hidden_01_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    
+    b1_shape = (hidden_dim,)
+    path, shape = initialize_layer_weights(b1_shape, "hidden_01_bias", "zeros")
+    layers_metadata["hidden_01_bias"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    
+    # Camada 03: Output Layer (Mapeia Hidden de volta para Vocab)
+    print("Inicializando Output Layer...")
+    output_shape = (hidden_dim, vocab_size)
+    path, shape = initialize_layer_weights(output_shape, "output_weights", "xavier")
+    layers_metadata["output_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    
+    # 3. Criar Registro de Pesos
+    create_weight_registry(layers_metadata)
+    
+    # 4. Validação do Disco
+    print("\nValidando arquivos criados:")
+    for name, meta in layers_metadata.items():
+        file_path = meta['path']
+        if os.path.exists(file_path):
+            size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            print(f" [OK] {name}: {size_mb:.2f} MB")
+        else:
+            print(f" [ERRO] {name} não encontrado!")
 
-    print(f"Sequência de IDs: {ids}")
-
-    # 2. Testar Desserialização (ID -> Texto)
-    print("\nDesserializando a sequência:")
-    frase_reconstruida = decode_sequence(ids)
-    
-    print(f"Frase Reconstruída: '{frase_reconstruida}'")
-    
-    # 3. Validar consistência
-    # (Note que a normalização da Sprint 2 torna tudo lowercase)
-    original_norm = " ".join(tokenize_line(frase_original))
-    reconstruida_norm = " ".join(tokenize_line(frase_reconstruida))
-    
-    if original_norm == reconstruida_norm:
-        print("\nSucesso: O processo de ida e volta é consistente.")
-    else:
-        print("\nErro: A frase reconstruída não condiz com a original normalizada.")
-        
-    # 4. Testar Token Desconhecido (UNK)
-    unk_id = 999999999
-    print(f"\nTestando ID desconhecido ({unk_id}):")
-    print(f" Resultado: '{get_text_by_id(unk_id)}'")
-
-    print("\nSprint 04 Concluída com Sucesso: Serialização/Desserialização Bidirecional validada.")
+    print("\nSprint 05 Concluída com Sucesso: Estrutura de Tensores em Disco validada.")
 
 if __name__ == "__main__":
     main()
