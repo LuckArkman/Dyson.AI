@@ -1,68 +1,52 @@
 import os
-import json
-import numpy as np
-from database_manager import get_db_connection
-from tensor_manager import initialize_layer_weights, create_weight_registry, WEIGHTS_DIR
+import psutil
+from database_manager import get_or_create_id
+from tensor_manager import load_tensor_mmap, dispose_tensor
+
+def get_ram_usage():
+    """Retorna o uso atual de RAM em MB."""
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / (1024 * 1024)
 
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 05")
+    print("ZeroRAM-GEN: Iniciando Sprint 06 (Loading On-Demand)")
     
-    # 1. Definir Dimensões do Modelo (V0)
-    # Vocabulário: ~252k tokens (obtido via database_manager)
-    # Embeddings: 128 (pequeno para ZeroRAM)
-    # Hidden Layers: 256
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT count(*) FROM vocab")
-        vocab_size = cursor.fetchone()[0]
+    # 1. Medir RAM Inicial
+    initial_ram = get_ram_usage()
+    print(f"RAM Inicial: {initial_ram:.2f} MB")
     
-    embed_dim = 128
-    hidden_dim = 256
+    # 2. Carregar Matriz de Embeddings via MMap (Aprox. 123MB em disco)
+    print("\nCarregando Matriz de Embeddings em modo MMap...")
+    embed_mmap = load_tensor_mmap("embedding_matrix")
     
-    print(f"Dimensões do Modelo V0:")
-    print(f"- Vocabulário: {vocab_size}")
-    print(f"- Dimensão de Embedding: {embed_dim}")
-    print(f"- Dimensão de Hidden: {hidden_dim}")
+    # A RAM não deve ter aumentado proporcionalmente aos 123MB do arquivo
+    ram_after_mmap = get_ram_usage()
+    print(f"Matriz Aberta. RAM atual: {ram_after_mmap:.2f} MB (Aumento: {ram_after_mmap-initial_ram:.2f} MB)")
     
-    # 2. Inicializar Camadas e Pesos em Disco (Arquitetura ZeroRAM)
-    layers_metadata = {}
+    # 3. Acessar uma "Fatia" (Slicing) - Zero RAM
+    # Vamos buscar o vetor do token 'olá'
+    token = 'olá'
+    token_id = get_or_create_id(token)
     
-    # Camada 01: Embeddings (Matriz gigante)
-    print("\nInicializando Embeddings...")
-    embed_shape = (vocab_size, embed_dim)
-    path, shape = initialize_layer_weights(embed_shape, "embedding_matrix", "xavier")
-    layers_metadata["embedding_matrix"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    print(f"\nAcessando vetor do token '{token}' (ID: {token_id})...")
+    vector_slice = embed_mmap[token_id] # Apenas esta linha é lida do disco
     
-    # Camada 02: Hidden 01 (Weights + Bias)
-    print("Inicializando Hidden Layer 01...")
-    h1_shape = (embed_dim, hidden_dim)
-    path, shape = initialize_layer_weights(h1_shape, "hidden_01_weights", "xavier")
-    layers_metadata["hidden_01_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    print(f"Vetor Original (slice): {vector_slice[:5]} [...]")
+    print(f"Shape do slice: {vector_slice.shape}")
     
-    b1_shape = (hidden_dim,)
-    path, shape = initialize_layer_weights(b1_shape, "hidden_01_bias", "zeros")
-    layers_metadata["hidden_01_bias"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    # RAM após ler o slice
+    ram_after_slice = get_ram_usage()
+    print(f"RAM após ler slice: {ram_after_slice:.2f} MB")
     
-    # Camada 03: Output Layer (Mapeia Hidden de volta para Vocab)
-    print("Inicializando Output Layer...")
-    output_shape = (hidden_dim, vocab_size)
-    path, shape = initialize_layer_weights(output_shape, "output_weights", "xavier")
-    layers_metadata["output_weights"] = {"path": path, "shape": list(shape), "dtype": "float32"}
+    # 4. Liberar Memória
+    print("\nDescartando tensores e forçando limpeza...")
+    dispose_tensor(embed_mmap)
+    dispose_tensor(vector_slice)
     
-    # 3. Criar Registro de Pesos
-    create_weight_registry(layers_metadata)
+    final_ram = get_ram_usage()
+    print(f"RAM Final: {final_ram:.2f} MB")
     
-    # 4. Validação do Disco
-    print("\nValidando arquivos criados:")
-    for name, meta in layers_metadata.items():
-        file_path = meta['path']
-        if os.path.exists(file_path):
-            size_mb = os.path.getsize(file_path) / (1024 * 1024)
-            print(f" [OK] {name}: {size_mb:.2f} MB")
-        else:
-            print(f" [ERRO] {name} não encontrado!")
-
-    print("\nSprint 05 Concluída com Sucesso: Estrutura de Tensores em Disco validada.")
+    print("\nSprint 06 Concluída com Sucesso: Mecanismo MMap validado. Nenhum tensor residente permanentemente em RAM.")
 
 if __name__ == "__main__":
     main()

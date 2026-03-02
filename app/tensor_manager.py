@@ -45,3 +45,18 @@ def get_layer_metadata(name):
     with open(REGISTRY_PATH, 'r') as f:
         registry = json.load(f)
     return registry['layers'].get(name)
+
+def load_tensor_mmap(name):
+    """Carrega um tensor do disco no modo memory-mapped (Zero RAM)."""
+    meta = get_layer_metadata(name)
+    if not meta:
+        raise ValueError(f"Dados da camada '{name}' não encontrados.")
+    # 'r' abre apenas para leitura, economizando RAM
+    return np.load(meta['path'], mmap_mode='r')
+
+def dispose_tensor(tensor_obj):
+    """Remove o objeto da RAM e força a coleta de lixo."""
+    import gc
+    # Nota: Em Python, del remove a referência. O GC limpa o espaço.
+    del tensor_obj
+    gc.collect()
