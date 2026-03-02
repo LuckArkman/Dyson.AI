@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pyopencl
+numpy
+python-multipart
+pymongo
+requests
+pydantic
+aiohttp
+cryptography
