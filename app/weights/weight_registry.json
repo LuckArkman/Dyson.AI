@@ -1,36 +1,3 @@
-{
-    "model_name": "ZeroRAM-GEN-V0",
-    "layers": {
-        "embedding_matrix": {
-            "path": "d:\\Dyson.AI\\app\\weights\\embedding_matrix.npy",
-            "shape": [
-                251876,
-                128
-            ],
-            "dtype": "float32"
-        },
-        "hidden_01_weights": {
-            "path": "d:\\Dyson.AI\\app\\weights\\hidden_01_weights.npy",
-            "shape": [
-                128,
-                256
-            ],
-            "dtype": "float32"
-        },
-        "hidden_01_bias": {
-            "path": "d:\\Dyson.AI\\app\\weights\\hidden_01_bias.npy",
-            "shape": [
-                256
-            ],
-            "dtype": "float32"
-        },
-        "output_weights": {
-            "path": "d:\\Dyson.AI\\app\\weights\\output_weights.npy",
-            "shape": [
-                256,
-                251876
-            ],
-            "dtype": "float32"
-        }
-    }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:84c5ef04e098e22a686c1b74b4a0d4760118429f6767fd0e2e455c309989ded2
+size 966
