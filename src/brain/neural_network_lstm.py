@@ -56,8 +56,16 @@ class NeuralNetworkLSTM:
         config_path = os.path.join(self.tensor_manager.tensor_dir, "model_config.json")
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
-                return json.load(f)["weight_ids"]
-
+                config_data = json.load(f)
+                cached_vocab = config_data.get("vocab_size", 0)
+                cached_hidden = config_data.get("hidden_size", 0)
+                
+                # SE O SHAPE MUDOU (Vocabulário ou Hidden), REGENERA TUDO
+                if cached_vocab == self.vocab_size and cached_hidden == self.hidden_size:
+                    print(f"[NeuralNetwork] Carregando pesos compatíveis do cache (Vocab: {self.vocab_size})")
+                    return config_data["weight_ids"]
+                else:
+                    print(f"[Aviso] Inconsistência de Shape no Cache ({cached_vocab} vs {self.vocab_size}). Regenerando Pesos...")
 
         ids = {}
         def create_w(r, c, name):
@@ -74,9 +82,13 @@ class NeuralNetworkLSTM:
         ids["W_hy"] = create_w(self.hidden_size, self.output_size, "WeightsOutputFinal")
         ids["B_y"] = self.tensor_manager.store_tensor(Tensor((1, self.output_size)), "BiasOutputFinal")
         
-        # Salva mapeamento para reuso
+        # Salva mapeamento E os hiperparâmetros para validação de forma futura
         with open(config_path, "w") as f:
-            json.dump({"weight_ids": ids}, f)
+            json.dump({
+                "vocab_size": self.vocab_size,
+                "hidden_size": self.hidden_size,
+                "weight_ids": ids
+            }, f)
         return ids
 
 
@@ -194,7 +206,11 @@ class NeuralNetworkLSTM:
             exp_logits = np.exp(logits - logits_max)
             probs = exp_logits / (np.sum(exp_logits) + 1e-12)
             
-            total_loss += -np.log(probs[0, target_indices[t]] + 1e-9)
+            target_id = int(target_indices[t])
+            if target_id >= probs.shape[1]: 
+                target_id = 1 # Fallback para <UNK>
+            
+            total_loss += -np.log(probs[0, target_id] + 1e-9)
 
             # Swaps para BPTT
             swap_files.extend([
@@ -209,9 +225,11 @@ class NeuralNetworkLSTM:
                 self.swap_manager.swap_out(o_t, f"o_t_{t}"), 
                 self.swap_manager.swap_out(x_t_data, f"x_t_{t}")
             ])
+
             
             h_prev_data, c_prev_data = h_t, c_t
             self.math_engine.release_buffer(x_t_gpu)
+
             
         # Limpeza final dos buffers GPU
         for b in [h_prev_gpu, z_f_gpu, z_i_gpu, z_c_gpu, z_o_gpu]: 
@@ -244,9 +262,13 @@ class NeuralNetworkLSTM:
 
             # 1. Output Gradients
             dy = probs.copy()
-            dy[0, target_indices[t]] -= 1
+            target_id = int(target_indices[t])
+            if target_id >= dy.shape[1]:
+                target_id = 1 # Fallback
+            dy[0, target_id] -= 1
             grads["W_hy"] += np.dot(h_t.T, dy)
             grads["B_y"] += dy
+
 
             # 2. Backprop into Hidden State
             dh = np.dot(dy, weights.w_hy.T) + dh_next
@@ -272,8 +294,12 @@ class NeuralNetworkLSTM:
             
             # Embedding Gradient
             dx = np.dot(df, weights.w_if.T) + np.dot(di, weights.w_ii.T) + np.dot(dcc, weights.w_ic.T) + np.dot(do, weights.w_io.T)
-            grads["W_embedding"][target_indices[t]:target_indices[t]+1] += dx # Simplificado
-
+            
+            # Garante que o índice de embedding está no limite
+            safe_id = int(target_indices[t])
+            if safe_id < grads["W_embedding"].shape[0]:
+                grads["W_embedding"][safe_id:safe_id+1] += dx
+            
             # 5. Passthrough for next T
             dh_next = np.dot(df, weights.w_hf.T) + np.dot(di, weights.w_hi.T) + np.dot(dcc, weights.w_hc.T) + np.dot(do, weights.w_ho.T)
             dc_next = f_t * dc

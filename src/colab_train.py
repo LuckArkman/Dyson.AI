@@ -46,7 +46,7 @@ def run_training():
     
     # Hiperparâmetros recomendados para Colab
     vocab_size = 5000 
-    embedding_size = 64
+    embedding_size = 32
     hidden_size = 128
     
     model = GenerativeNeuralNetworkLSTM(
@@ -65,9 +65,9 @@ def run_training():
         dataset_path=dataset_path,
         final_model_path="Dayson/Dayson_Colab.json",
         learning_rate=0.001, # Recomendado para estabilidade
-        epochs=5,
-        batch_size=32,
-        context_window=12,
+        epochs=150,
+        batch_size=64,
+        context_window=32,
         validation_split=0.1
     )
     print("[Sucesso] Treinamento concluído no Google Colab!")

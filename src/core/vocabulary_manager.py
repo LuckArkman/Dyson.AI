@@ -91,8 +91,10 @@ class VocabularyManager:
 
     def get_vocab_count(self) -> int:
         cursor = self.connection.cursor()
-        cursor.execute("SELECT COUNT(*) FROM vocab")
-        return cursor.fetchone()[0]
+        cursor.execute("SELECT MAX(id) FROM vocab")
+        result = cursor.fetchone()[0]
+        return (result + 1) if result is not None else 2 # Pelo menos <PAD> e <UNK>
+
 
     def close(self):
         self.connection.close()
