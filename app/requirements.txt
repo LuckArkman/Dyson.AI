@@ -1,0 +1,6 @@
+numpy
+lz4
+psutil
+requests
+langchain
+google-generativeai

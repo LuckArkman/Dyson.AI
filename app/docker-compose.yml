@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  zeroram-gen:
+    build: .
+    container_name: zeroram_engine
+    volumes:
+      - ./weights:/app/weights
+      - ./Dayson:/app/Dayson
+    environment:
+      - NODE_ID=dyson_node_01
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
