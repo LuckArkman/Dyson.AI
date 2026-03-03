@@ -4,6 +4,22 @@ from engine import embedding_lookup, dense_layer_forward, compute_softmax
 from tensor_manager import dispose_tensor
 from tokenizer import normalize_text, tokenize_line, decode_sequence
 
+def apply_temperature(logits, temperature):
+    """Ajusta os logits com base na temperatura."""
+    if temperature <= 0: return logits
+    return logits / temperature
+
+def top_k_sampling(probs, k):
+    """Seleciona um token a partir dos K mais prováveis."""
+    top_indices = np.argpartition(probs, -k)[-k:]
+    top_probs = probs[top_indices]
+    top_probs = top_probs / np.sum(top_probs) # Re-normaliza
+    return int(np.random.choice(top_indices, p=top_probs))
+
+def greedy_sampling(probs):
+    """Seleciona o token mais provável (determinístico)."""
+    return int(np.argmax(probs))
+
 def predict_next_token(token_ids, temperature=1.0, top_k=None):
     """
     Prediz o próximo token a partir de uma sequência de IDs.
@@ -21,26 +37,18 @@ def predict_next_token(token_ids, temperature=1.0, top_k=None):
     last_step_logits = logits[-1, :]
     
     # 2. Amostragem (Sampling)
-    if temperature != 1.0:
-        last_step_logits = last_step_logits / temperature
-        
+    last_step_logits = apply_temperature(last_step_logits, temperature)
     probs = compute_softmax(last_step_logits)
     
     if top_k is not None:
-        # Pega os índices dos top_k maiores valores
-        top_indices = np.argpartition(probs, -top_k)[-top_k:]
-        top_probs = probs[top_indices]
-        top_probs = top_probs / np.sum(top_probs) # Re-normaliza
-        next_id = np.random.choice(top_indices, p=top_probs)
+        next_id = top_k_sampling(probs, top_k)
     else:
-        # Amostragem simples (Multinomial) ou Greedy (argmax)
-        # Vamos usar Greedy para consistência no teste inicial
-        next_id = np.argmax(probs)
+        next_id = greedy_sampling(probs)
         
     # Limpeza
     dispose_tensor(emb); dispose_tensor(h1_z); dispose_tensor(logits)
     
-    return int(next_id)
+    return next_id
 
 def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None):
     """
