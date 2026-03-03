@@ -77,6 +77,35 @@ def dispose_tensor(tensor_obj):
     if tensor_obj is not None:
         del tensor_obj
 
+def store_bias_vector(name, vector, description=""):
+    """Salva um vetor de viés e registra no banco de dados."""
+    from database_manager import get_db_connection
+    
+    path = os.path.join(WEIGHTS_DIR, "bias")
+    os.makedirs(path, exist_ok=True)
+    file_path = os.path.join(path, f"{name}.npy")
+    
+    np.save(file_path, vector.astype(np.float16))
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO bias_templates (name, description, vector_path) VALUES (?, ?, ?)",
+            (name, description, file_path)
+        )
+        conn.commit()
+    print(f"[OK] Viés '{name}' persistido em {file_path}")
+
+def initialize_default_biases(embed_dim=128):
+    """Cria templates de viés padrão (Creativity vs Technical)."""
+    # Viés Criativo: Pequeno offset positivo em dimensões aleatórias
+    creative = np.random.randn(embed_dim).astype(np.float16) * 0.1
+    store_bias_vector("creative", creative, "Aumenta a variabilidade das predições.")
+    
+    # Viés Técnico: Reduz magnitude para ser mais determinístico (simulado)
+    technical = np.zeros(embed_dim).astype(np.float16)
+    store_bias_vector("technical", technical, "Mantém o comportamento padrão estável.")
+
 def store_tensor_disk(name, tensor, folder='temp'):
     """Salva um tensor temporário (gradiente ou ativação) no disco."""
     path = os.path.join(WEIGHTS_DIR, folder)

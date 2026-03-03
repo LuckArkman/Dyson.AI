@@ -1,6 +1,6 @@
 import numpy as np
 from database_manager import get_or_create_id, get_text_by_id
-from engine import embedding_lookup, dense_layer_forward, compute_softmax
+from engine import embedding_lookup, dense_layer_forward, compute_softmax, apply_behavioral_bias
 from tensor_manager import dispose_tensor
 from tokenizer import normalize_text, tokenize_line, decode_sequence
 
@@ -20,12 +20,16 @@ def greedy_sampling(probs):
     """Seleciona o token mais provável (determinístico)."""
     return int(np.argmax(probs))
 
-def predict_next_token(token_ids, temperature=1.0, top_k=None):
+def predict_next_token(token_ids, temperature=1.0, top_k=None, bias_name=None):
     """
     Prediz o próximo token a partir de uma sequência de IDs.
     """
     # 1. Forward Pass Zero RAM
     emb = embedding_lookup(token_ids)
+    
+    # Sprint 24: Aplicação de Viés Comportamental
+    if bias_name:
+        emb = apply_behavioral_bias(emb, bias_name)
     
     # Hidden Layer
     h1_z = dense_layer_forward(emb, "hidden_01_weights", "hidden_01_bias", activation='relu')
@@ -50,9 +54,9 @@ def predict_next_token(token_ids, temperature=1.0, top_k=None):
     
     return next_id
 
-def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_on_punctuation=True):
+def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_on_punctuation=True, bias_name=None):
     """
-    Gera uma sequência de texto auto-regressiva com detecção de Stop Tokens.
+    Gera uma sequência de texto auto-regressiva com detecção de Stop Tokens e Viés.
     """
     # Tokenização do prompt
     tokens = tokenize_line(normalize_text(prompt))
@@ -67,7 +71,7 @@ def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_o
         # Janela de contexto deslizante (últimos 8 tokens)
         context_ids = generated_ids[-8:] 
         
-        next_id = predict_next_token(context_ids, temperature, top_k)
+        next_id = predict_next_token(context_ids, temperature, top_k, bias_name=bias_name)
         
         if next_id == 0: # <PAD>
             break

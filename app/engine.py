@@ -44,6 +44,27 @@ def embedding_lookup(token_ids):
     
     return vectors
 
+def apply_behavioral_bias(embeddings, bias_name):
+    """
+    Aplica um vetor de viés (Bias) comportamental aos embeddings.
+    Zero RAM: O viés é carregado sob demanda.
+    """
+    from tensor_manager import load_tensor_disk, get_layer_metadata
+    
+    # Carrega o vetor de viés do disco
+    # Assumindo que o bias tem o mesmo shape da dimensão de embedding (128)
+    try:
+        bias_vector = load_tensor_disk(bias_name, folder='bias')
+        # Soma o viés a todos os embeddings na sequência/batch
+        # Broadcast de numpy resolve o shape (batch, seq, dim) + (dim)
+        embeddings = embeddings + bias_vector
+        dispose_tensor(bias_vector)
+    except:
+        # Se o viés não existir, retorna os embeddings originais silenciosamente
+        pass
+        
+    return embeddings
+
 def dense_layer_forward(input_tensor, weights_name, bias_name=None, activation='relu'):
     """
     Executa o Forward de uma camada densa carregando pesos sob demanda.

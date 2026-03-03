@@ -62,6 +62,13 @@ def init_db():
                 message TEXT
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bias_templates (
+                name TEXT PRIMARY KEY,
+                description TEXT,
+                vector_path TEXT
+            )
+        ''')
         # Inserir tokens especiais se não existirem
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         special_tokens = [
