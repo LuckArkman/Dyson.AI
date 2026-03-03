@@ -42,6 +42,26 @@ HTML_TEMPLATE = """
     </div>
 
     <div class="card">
+        <h2>Progresso do Treinamento (Convergência)</h2>
+        <table>
+            <tr>
+                <th>Época</th>
+                <th>Step</th>
+                <th>Loss</th>
+                <th>Timestamp</th>
+            </tr>
+            {% for row in train_logs %}
+            <tr>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+                <td class="metric" style="color: #ff5252;">{{ "%.6f"|format(row[2]) }}</td>
+                <td>{{ row[3] }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="card">
         <h2>Nós do Swarm</h2>
         <ul>
             {% for node in nodes %}
@@ -57,14 +77,20 @@ HTML_TEMPLATE = """
 def index():
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        # Telemetria I/O
         cursor.execute("SELECT metric_name, value, context, timestamp FROM telemetry ORDER BY timestamp DESC LIMIT 20")
         telemetry = cursor.fetchall()
         
+        # Histórico de Treino
+        cursor.execute("SELECT epoch, step, loss, timestamp FROM train_log ORDER BY timestamp DESC LIMIT 15")
+        train_logs = cursor.fetchall()
+        
+        # Swarm Nodes
         cursor.execute("SELECT node_id, base_url, status FROM network_nodes")
         nodes = cursor.fetchall()
         
-    return render_template_string(HTML_TEMPLATE, telemetry=telemetry, nodes=nodes)
+    return render_template_string(HTML_TEMPLATE, telemetry=telemetry, nodes=nodes, train_logs=train_logs)
 
 if __name__ == "__main__":
-    print("Iniciando Dashboard Web em http://localhost:5000")
+    print("Iniciando Dashboard de Treino em http://localhost:5000")
     app.run(port=5000)
