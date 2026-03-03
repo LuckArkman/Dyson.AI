@@ -1,33 +1,57 @@
 import os
-from database_manager import init_db
+import time
+from database_manager import init_db, get_db_connection
 from tensor_manager import ensure_v0_weights
-from inference import generate_text
+from tokenizer import sequence_generator
+from trainer import train_step
 
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 13 (Subsistema de Inferência)")
+    print("ZeroRAM-GEN: Iniciando Sprint 14 (Telemetria)")
     
     # 0. Setup
     init_db()
     ensure_v0_weights()
     
-    # 1. Teste de Geração de Texto
-    # Nota: Como o modelo ainda não foi treinado extensivamente, 
-    # os resultados serão baseados nos pesos iniciais (aleatórios) 
-    # ou no mini-treino da Sprint anterior.
+    # 1. Parâmetros
+    base_dir = os.path.dirname(__file__)
+    data_path = os.path.join(base_dir, 'Dayson', 'pt_0.txt')
+    batch_size = 2
+    seq_length = 5
     
-    prompt = "O robô disse"
+    # 2. Executar alguns passos para coletar telemetria
+    print("\nExecutando Ciclo de Treino com Coleta de Telemetria...")
+    gen = sequence_generator(data_path, batch_size, seq_length)
     
-    print("\n--- Teste de Geração 01 (Greedy Search) ---")
-    resultado_greedy = generate_text(prompt, max_new_tokens=5, temperature=1.0)
-    print(f"Resultado: {resultado_greedy}")
-    
-    print("\n--- Teste de Geração 02 (Com Temperature 0.8 e Top-K 50) ---")
-    resultado_random = generate_text(prompt, max_new_tokens=5, temperature=0.8, top_k=50)
-    print(f"Resultado: {resultado_random}")
-    
-    print("\nSprint 13 Concluída com Sucesso:")
-    print("- Motor de Inferência operando em modo Zero RAM.")
-    print("- Geração auto-regressiva validada.")
+    for i in range(3):
+        X, Y = next(gen)
+        loss, t = train_step(X, Y)
+        print(f" [Step {i+1}] Loss: {loss:.4f}")
+        
+    # 3. Validar Telemetria no Banco
+    print("\nResumo da Telemetria (SQLite):")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # Latência de I/O
+        cursor.execute("SELECT AVG(value) FROM telemetry WHERE metric_name = 'io_read_latency'")
+        avg_read = cursor.fetchone()[0]
+        print(f" - Latência Média de Leitura (I/O): {avg_read:.6f}s")
+        
+        cursor.execute("SELECT AVG(value) FROM telemetry WHERE metric_name = 'io_write_latency'")
+        avg_write = cursor.fetchone()[0]
+        print(f" - Latência Média de Escrita (I/O): {avg_write:.6f}s")
+        
+        # RAM
+        cursor.execute("SELECT MAX(value) FROM telemetry WHERE metric_name = 'ram_usage_mb'")
+        max_ram = cursor.fetchone()[0]
+        print(f" - Pico de RAM Detectado: {max_ram:.2f} MB")
+        
+        # Gradientes
+        cursor.execute("SELECT value FROM telemetry WHERE metric_name = 'grad_norm' ORDER BY timestamp DESC LIMIT 1")
+        last_grad = cursor.fetchone()[0]
+        print(f" - Última Magnitude de Gradiente: {last_grad:.8f}")
+
+    print("\nSprint 14 Concluída com Sucesso: Telemetria integrada e validada.")
 
 if __name__ == "__main__":
     main()

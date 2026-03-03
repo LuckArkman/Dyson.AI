@@ -11,6 +11,8 @@ from engine import (
     backward_layer_step, d_relu, accumulate_embedding_grad
 )
 from optimizer import increment_training_step, adam_update_step
+import psutil
+from database_manager import log_telemetry
 
 def train_step(X_batch, Y_batch):
     """Executa um único passo de treinamento (Forward -> Backward -> Update)."""
@@ -53,6 +55,14 @@ def train_step(X_batch, Y_batch):
     
     # --- UPDATE (ADAM) ---
     t = increment_training_step()
+    
+    # Telemetria: Gradiente Norm (Suficiente olhar para um exemplo)
+    grad_norm = np.linalg.norm(grad_w_out)
+    log_telemetry('grad_norm', grad_norm, 'layer:output_weights')
+    
+    # Telemetria: RAM Usage
+    ram_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+    log_telemetry('ram_usage_mb', ram_mb)
     
     # Atualizar Output Weights
     meta_out = get_layer_metadata("output_weights")

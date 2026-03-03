@@ -45,6 +45,14 @@ def init_db():
                 value TEXT
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS telemetry (
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                metric_name TEXT,
+                value REAL,
+                context TEXT
+            )
+        ''')
         # Inserir token <PAD> se não existir
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         conn.commit()
@@ -107,6 +115,16 @@ def log_training_metrics(epoch, step, loss):
         cursor.execute(
             "INSERT INTO train_log (epoch, step, loss) VALUES (?, ?, ?)",
             (epoch, int(step), float(loss))
+        )
+        conn.commit()
+
+def log_telemetry(metric_name, value, context=None):
+    """Grava métricas de telemetria no SQLite."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO telemetry (metric_name, value, context) VALUES (?, ?, ?)",
+            (metric_name, float(value), context)
         )
         conn.commit()
 

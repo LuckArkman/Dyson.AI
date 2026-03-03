@@ -1,6 +1,8 @@
 import numpy as np
 import os
 import json
+import time
+from database_manager import log_telemetry
 
 # Diretório base para os pesos do modelo
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), 'weights')
@@ -24,7 +26,10 @@ def initialize_layer_weights(shape, name, init_type='xavier'):
         weights = np.random.randn(*shape).astype(np.float32) * 0.01
 
     file_path = os.path.join(WEIGHTS_DIR, f"{name}.npy")
+    start_time = time.time()
     np.save(file_path, weights)
+    latency = time.time() - start_time
+    log_telemetry('io_write_latency', latency, f"layer:{name}")
     return file_path, weights.shape
 
 def create_weight_registry(layers_info):
@@ -51,8 +56,13 @@ def load_tensor_mmap(name):
     meta = get_layer_metadata(name)
     if not meta:
         raise ValueError(f"Dados da camada '{name}' não encontrados.")
-    # 'r' abre apenas para leitura, economizando RAM
-    return np.load(meta['path'], mmap_mode='r')
+    
+    start_time = time.time()
+    tensor = np.load(meta['path'], mmap_mode='r')
+    latency = time.time() - start_time
+    log_telemetry('io_read_latency', latency, f"layer:{name}")
+    
+    return tensor
 
 def dispose_tensor(tensor_obj):
     """Remove o objeto da RAM e força a coleta de lixo."""
