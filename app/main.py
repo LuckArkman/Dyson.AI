@@ -1,111 +1,85 @@
 import os
 import numpy as np
-from database_manager import init_db, get_or_create_id, get_db_connection
+from database_manager import init_db, get_or_create_id
 from tensor_manager import (
     ensure_v0_weights, store_tensor_disk, load_tensor_disk, 
-    dispose_tensor, reset_accumulated_grads, WEIGHTS_DIR
+    dispose_tensor, reset_accumulated_grads, WEIGHTS_DIR,
+    get_layer_metadata
 )
 from engine import (
     embedding_lookup, dense_layer_forward, apply_activation, 
     compute_softmax, calculate_loss, compute_output_gradient, 
-    backward_layer_step, d_relu, accumulate_embedding_grad
+    backward_layer_step, d_relu
 )
+from optimizer import increment_training_step, adam_update_step
 
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 10 (Conclusão do Backward Pass)")
+    print("ZeroRAM-GEN: Iniciando Sprint 11 (Otimizadores no Disco)")
     
-    # 0. Setup e Limpeza
+    # 0. Setup
     init_db()
     ensure_v0_weights()
     reset_accumulated_grads()
     
-    # 1. Forward Pass (Salvando estados no disco)
-    # ----------------------------------------
-    tokens_input = ["olá", "!", "como", "você"]
-    target_tokens = ["você", "está", "hoje", "?"]
+    # Incrementar o passo global do Adam
+    t = increment_training_step()
+    print(f"\nPasso de Treinamento (t): {t}")
     
-    input_ids = [get_or_create_id(t) for t in tokens_input]
-    target_ids = [get_or_create_id(t) for t in target_tokens]
+    # 1. Simulação de um passo de Forward + Backward para obter gradientes
+    input_ids = [get_or_create_id('oi')]
+    target_ids = [get_or_create_id('.')]
     
-    print("\n[Forward] Processando sequência...")
-    # Camada 1: Embedding
     emb = embedding_lookup(input_ids)
-    store_tensor_disk("forward_emb", emb)
-    
-    # Camada 2: Hidden
     h1_z = dense_layer_forward(emb, "hidden_01_weights", "hidden_01_bias", activation='linear')
     h1_act = apply_activation(h1_z, 'relu')
-    store_tensor_disk("forward_h1_act", h1_act)
-    store_tensor_disk("forward_h1_z", h1_z)
-    
-    # Camada 3: Output
     logits = dense_layer_forward(h1_act, "output_weights", activation='linear')
     probs = compute_softmax(logits)
-    loss = calculate_loss(probs, target_ids)
-    print(f"Loss Inicial: {loss:.6f}")
     
-    # 2. Backward Pass (Caminho inverso até o Embedding)
-    # ------------------------------------------------
-    print("\n[Backward] Iniciando retropropagação total...")
-    
-    # Passo 1: Gradiente na Saída
+    # Backward simplificado para uma camada para teste do otimizador
     grad_output = compute_output_gradient(probs, target_ids)
-    
-    # Passo 2: Output Weights -> Hidden Act
-    h1_act_from_disk = load_tensor_disk("forward_h1_act")
-    print(" -> Calculando gradientes para 'output_weights'...")
     grad_w_out, grad_b_out, grad_h1_act = backward_layer_step(
-        grad_output, "output_weights", h1_act_from_disk
+        grad_output, "output_weights", h1_act
     )
-    store_tensor_disk("output_weights", grad_w_out, folder='grads')
     
-    # Passo 3: Hidden Act -> Hidden Z (ReLU Derivative)
-    h1_z_from_disk = load_tensor_disk("forward_h1_z")
-    grad_h1_z = grad_h1_act * d_relu(h1_z_from_disk)
+    # 2. Teste do Otimizador Adam
+    print("\nExecutando atualização Adam para 'output_weights'...")
     
-    # Passo 4: Hidden Weights & Bias -> Embedding
-    emb_from_disk = load_tensor_disk("forward_emb")
-    print(" -> Calculando gradientes para 'hidden_01_weights' e 'bias'...")
-    grad_w_h1, grad_b_h1, grad_emb = backward_layer_step(
-        grad_h1_z, "hidden_01_weights", emb_from_disk
-    )
-    store_tensor_disk("hidden_01_weights", grad_w_h1, folder='grads')
-    store_tensor_disk("hidden_01_bias", grad_b_h1, folder='grads')
+    # Carregar o peso original de forma explícita para comparação
+    meta = get_layer_metadata("output_weights")
+    original_weights = np.load(meta['path'])
     
-    # Passo 5: Embedding Matrix Gradient
-    print(" -> Calculando gradientes para a matriz de Embeddings...")
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT count(*) FROM vocab")
-        vocab_size = cursor.fetchone()[0]
+    # Aplicar atualização
+    new_weights = adam_update_step("output_weights", original_weights, grad_w_out)
     
-    grad_embedding_matrix = accumulate_embedding_grad(
-        input_ids, grad_emb, vocab_size, emb.shape[1]
-    )
-    store_tensor_disk("embedding_matrix", grad_embedding_matrix, folder='grads')
+    # Salvar o novo peso de volta no disco (ZeroRAM: atualizar e persistir)
+    np.save(meta['path'], new_weights)
     
-    # 3. Validação final
-    print("\nValidando arquivos de gradientes gerados:")
-    for name in ["output_weights", "hidden_01_weights", "hidden_01_bias", "embedding_matrix"]:
-        path = os.path.join(WEIGHTS_DIR, "grads", f"{name}.npy")
-        if os.path.exists(path):
-            size = os.path.getsize(path) / 1024
-            print(f" [OK] {name}.grad: {size:.2f} KB")
-        else:
-            print(f" [ERRO] {name}.grad não encontrado!")
-            
-    print("\nMagnitude dos gradientes de Embedding (Tokens ativos):")
-    # Mostrar magnitude média apenas para as linhas que receberam gradiente
-    active_grads = grad_embedding_matrix[input_ids]
-    print(f" - Magnitude média (Active Embeds): {np.abs(active_grads).mean():.10f}")
+    # 3. Validação
+    print("\nValidando Resultados da Sprint 11:")
+    
+    # Verificar se os estados do otimizador foram criados
+    m_path = os.path.join(WEIGHTS_DIR, 'optim', "output_weights_m.npy")
+    v_path = os.path.join(WEIGHTS_DIR, 'optim', "output_weights_v.npy")
+    
+    if os.path.exists(m_path):
+        print(f" [OK] Estado M salvo: {os.path.getsize(m_path)/1024:.2f} KB")
+    if os.path.exists(v_path):
+        print(f" [OK] Estado V salvo: {os.path.getsize(v_path)/1024:.2f} KB")
+        
+    # Verificar se as mudanças nos pesos ocorreram
+    diff = np.abs(new_weights - original_weights).mean()
+    print(f" [OK] Diferença média nos pesos após atualização: {diff:.10f}")
+    
+    if diff > 0:
+        print(" [OK] Otimizador calibrou os pesos com sucesso.")
+    else:
+        print(" [ERRO] Os pesos não foram alterados.")
 
-    # Limpeza de tensores em RAM
-    dispose_tensor(emb); dispose_tensor(h1_z); dispose_tensor(h1_act); dispose_tensor(logits)
-    dispose_tensor(grad_output); dispose_tensor(grad_w_out); dispose_tensor(grad_b_out)
-    dispose_tensor(grad_h1_act); dispose_tensor(grad_w_h1); dispose_tensor(grad_b_h1)
-    dispose_tensor(grad_embedding_matrix)
+    # Limpeza
+    dispose_tensor(original_weights); dispose_tensor(new_weights)
+    dispose_tensor(grad_w_out); dispose_tensor(logits)
 
-    print("\nSprint 10 Concluída com Sucesso: Retropropagação concluída até os Embeddings.")
+    print("\nSprint 11 Concluída com Sucesso: Otimizador Adam persistente validado.")
 
 if __name__ == "__main__":
     main()

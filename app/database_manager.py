@@ -39,6 +39,12 @@ def init_db():
                 loss REAL
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS train_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
         # Inserir token <PAD> se não existir
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         conn.commit()
