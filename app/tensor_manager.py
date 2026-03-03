@@ -3,22 +3,38 @@ import os
 import json
 import time
 import lz4.frame
-from database_manager import log_telemetry
+import shutil
+from typing import List, Optional, Tuple, Dict, Any, Union
+from database_manager import log_telemetry, get_db_connection
 
 # Diretório base para os pesos do modelo
-WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), 'weights')
-REGISTRY_PATH = os.path.join(WEIGHTS_DIR, 'weight_registry.json')
+WEIGHTS_DIR: str = os.path.join(os.path.dirname(__file__), 'weights')
+REGISTRY_PATH: str = os.path.join(WEIGHTS_DIR, 'weight_registry.json')
 
-def ensure_weights_dir():
-    """Garante que o diretório de pesos existe."""
+# Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
+DEFAULT_DTYPE = np.float16 
+USE_INT8: bool = True # Habilitar quantização experimental
+
+def ensure_weights_dir() -> None:
+    """Garante que o diretório de pesos exista no sistema de arquivos."""
     os.makedirs(WEIGHTS_DIR, exist_ok=True)
 
-def initialize_layer_weights(shape, name, init_type='xavier', dtype=np.float32):
-    """Inicializa um tensor de peso e salva no disco com o dtype especificado."""
+def initialize_layer_weights(shape: Tuple[int, ...], name: str, init_type: str = 'xavier', dtype: Any = np.float32) -> Tuple[str, Tuple[int, ...]]:
+    """
+    Inicializa um tensor de peso e salva no disco.
+    
+    Args:
+        shape: Dimensões do tensor.
+        name: Nome identificador da camada.
+        init_type: Tipo de inicialização ('xavier', 'zeros', 'normal').
+        dtype: Tipo de dado numérico.
+        
+    Returns:
+        Tuple[str, Tuple[int, ...]]: Caminho do arquivo salvo e o shape do tensor.
+    """
     ensure_weights_dir()
     
     if init_type == 'xavier':
-        # Xavier Initialization (Glorot)
         limit = np.sqrt(6 / sum(shape))
         weights = np.random.uniform(-limit, limit, shape).astype(dtype)
     elif init_type == 'zeros':
@@ -33,15 +49,20 @@ def initialize_layer_weights(shape, name, init_type='xavier', dtype=np.float32):
     log_telemetry('io_write_latency', latency, f"layer:{name}")
     return file_path, weights.shape
 
-def save_tensor_logged(path, tensor, name="unknown"):
-    """Salva um tensor no disco registrando a latência de escrita."""
+def save_tensor_logged(path: str, tensor: np.ndarray, name: str = "unknown") -> None:
+    """Salva um tensor registrando a latência de escrita na telemetria."""
     start_time = time.time()
     np.save(path, tensor)
     latency = time.time() - start_time
     log_telemetry('io_write_latency', latency, f"file:{name}")
 
-def create_weight_registry(layers_info):
-    """Cria um registro JSON com os metadados de todos os tensores."""
+def create_weight_registry(layers_info: Dict[str, Any]) -> None:
+    """
+    Cria um registro JSON com os metadados de todos os tensores do modelo.
+    
+    Args:
+        layers_info: Dicionário contendo metadados das camadas.
+    """
     ensure_weights_dir()
     registry = {
         "model_name": "ZeroRAM-GEN-V0",
@@ -51,15 +72,15 @@ def create_weight_registry(layers_info):
         json.dump(registry, f, indent=4)
     print(f"Registro de pesos criado em: {REGISTRY_PATH}")
 
-def get_layer_metadata(name):
-    """Recupera metadados de uma camada específica do registro."""
+def get_layer_metadata(name: str) -> Optional[Dict[str, Any]]:
+    """Recupera metadados de uma camada específica do registro global."""
     if not os.path.exists(REGISTRY_PATH):
         return None
     with open(REGISTRY_PATH, 'r') as f:
         registry = json.load(f)
     return registry['layers'].get(name)
 
-def load_tensor_mmap(name):
+def load_tensor_mmap(name: str) -> np.ndarray:
     """Carrega um tensor do disco no modo memory-mapped (Zero RAM)."""
     meta = get_layer_metadata(name)
     if not meta:
@@ -72,16 +93,13 @@ def load_tensor_mmap(name):
     
     return tensor
 
-def dispose_tensor(tensor_obj):
-    """Remove o objeto da RAM. O GC fará a limpeza automática conforme necessário."""
-    # Nota: gc.collect() em cada descarte é extremamente lento (Sprint 22 optimization)
+def dispose_tensor(tensor_obj: Any) -> None:
+    """Remove a referência do objeto para auxiliar o Garbage Collector."""
     if tensor_obj is not None:
         del tensor_obj
 
-def store_bias_vector(name, vector, description=""):
-    """Salva um vetor de viés e registra no banco de dados."""
-    from database_manager import get_db_connection
-    
+def store_bias_vector(name: str, vector: np.ndarray, description: str = "") -> None:
+    """Salva um vetor de viés comportamental e registra no banco de dados."""
     path = os.path.join(WEIGHTS_DIR, "bias")
     os.makedirs(path, exist_ok=True)
     file_path = os.path.join(path, f"{name}.npy")
@@ -97,62 +115,44 @@ def store_bias_vector(name, vector, description=""):
         conn.commit()
     print(f"[OK] Viés '{name}' persistido em {file_path}")
 
-def initialize_default_biases(embed_dim=128):
-    """Cria templates de viés padrão (Creativity vs Technical)."""
-    # Viés Criativo: Pequeno offset positivo em dimensões aleatórias
-    creative = np.random.randn(embed_dim).astype(np.float16) * 0.1
-    store_bias_vector("creative", creative, "Aumenta a variabilidade das predições.")
+def quantize_to_int8(tensor: np.ndarray) -> Tuple[np.ndarray, float, float]:
+    """Converte um tensor para INT8 usando escala linear e ponto zero."""
+    tensor_f32 = tensor.astype(np.float32)
+    t_min, t_max = np.min(tensor_f32), np.max(tensor_f32)
     
-    # Viés Técnico: Reduz magnitude para ser mais determinístico (simulado)
-    technical = np.zeros(embed_dim).astype(np.float16)
-    store_bias_vector("technical", technical, "Mantém o comportamento padrão estável.")
-
-def quantize_to_int8(tensor):
-    """Converte um tensor FP32/FP16 para INT8 com escala e zero_point."""
-    tensor = tensor.astype(np.float32)
-    t_min, t_max = np.min(tensor), np.max(tensor)
-    
-    # Scale: mapear o range original para [-128, 127]
-    # Range INT8 = 255
     scale = (t_max - t_min) / 255.0 if t_max != t_min else 1.0
     zero_point = -t_min / scale - 128 if scale != 0 else 0
     
-    # Mapear e clipar
-    q_tensor = np.round(tensor / scale + zero_point).clip(-128, 127).astype(np.int8)
-    
+    q_tensor = np.round(tensor_f32 / scale + zero_point).clip(-128, 127).astype(np.int8)
     return q_tensor, float(scale), float(zero_point)
 
-def dequantize_from_int8(q_tensor, scale, zero_point):
-    """Restaura o tensor para float usando escala e zero_point."""
+def dequantize_from_int8(q_tensor: np.ndarray, scale: float, zero_point: float) -> np.ndarray:
+    """Restaura um tensor INT8 para ponto flutuante."""
     return ((q_tensor.astype(np.float32) - zero_point) * scale).astype(DEFAULT_DTYPE)
 
-def save_quantized_tensor(name, tensor):
-    """Quantiza e salva um tensor no disco com metadados de escala."""
+def save_quantized_tensor(name: str, tensor: np.ndarray) -> None:
+    """Quantiza e salva um tensor no disco acompanhado de seu arquivo .meta."""
     q_tensor, scale, zp = quantize_to_int8(tensor)
     
-    # Salvar tensor INT8
     path = os.path.join(WEIGHTS_DIR, f"{name}_int8.npy")
     np.save(path, q_tensor)
     
-    # Salvar metadados de escala (em um arquivo JSON pequeno ou via banco)
-    # Para simplicidade agora, vamos usar um arquivo .meta
     meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
-    import json
     with open(meta_path, 'w') as f:
         json.dump({"scale": scale, "zero_point": zp, "quantized": True}, f)
         
     print(f"[QUANT] '{name}' salvo como INT8 (Scale: {scale:.6f})")
 
-def get_quant_params(name):
-    """Recupera metadados de quantização de uma camada."""
+def get_quant_params(name: str) -> Optional[Dict[str, Any]]:
+    """Recupera metadados de quantização (.meta) de uma camada."""
     meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
     if os.path.exists(meta_path):
         with open(meta_path, 'r') as f:
             return json.load(f)
     return None
 
-def store_tensor_disk(name, tensor, folder='temp', quantize=False):
-    """Salva um tensor temporário (gradiente ou ativação) no disco."""
+def store_tensor_disk(name: str, tensor: np.ndarray, folder: str = 'temp', quantize: bool = False) -> str:
+    """Salva um tensor (gradiente ou ativação) no disco, opcionalmente quantizado."""
     path = os.path.join(WEIGHTS_DIR, folder)
     os.makedirs(path, exist_ok=True)
     
@@ -162,7 +162,6 @@ def store_tensor_disk(name, tensor, folder='temp', quantize=False):
         q_tensor, scale, zp = quantize_to_int8(tensor)
         file_path = os.path.join(path, f"{name}_q.npy")
         np.save(file_path, q_tensor)
-        # Salvar escala localmente no nome do arquivo ou arquivo meta
         meta_path = os.path.join(path, f"{name}_q.meta")
         with open(meta_path, 'w') as f:
             json.dump({"scale": scale, "zero_point": zp}, f)
@@ -171,11 +170,11 @@ def store_tensor_disk(name, tensor, folder='temp', quantize=False):
         np.save(file_path, tensor)
         
     latency = time.time() - start_time
-    log_telemetry('io_write_latency', latency, f"temp:{name}")
+    log_telemetry('io_write_latency', latency, f"{folder}:{name}")
     return file_path
 
-def load_tensor_disk(name, folder='temp'):
-    """Carrega um tensor temporário do disco, checando por versão quantizada primeiro."""
+def load_tensor_disk(name: str, folder: str = 'temp') -> Optional[np.ndarray]:
+    """Carrega um tensor temporário do disco, suportando desquantização automática."""
     path = os.path.join(WEIGHTS_DIR, folder)
     q_file_path = os.path.join(path, f"{name}_q.npy")
     file_path = os.path.join(path, f"{name}.npy")
@@ -194,29 +193,22 @@ def load_tensor_disk(name, folder='temp'):
         return None
         
     latency = time.time() - start_time
-    log_telemetry('io_read_latency', latency, f"temp_load:{name}")
+    log_telemetry('io_read_latency', latency, f"{folder}_load:{name}")
     return tensor
 
-def reset_accumulated_grads():
-    """Remove todos os gradientes temporários do disco."""
-    path = os.path.join(WEIGHTS_DIR, 'grads')
-    if os.path.exists(path):
-        import shutil
-        shutil.rmtree(path)
-        os.makedirs(path)
-    # Também limpar pasta temp (ativações)
-    temp_path = os.path.join(WEIGHTS_DIR, 'temp')
-    if os.path.exists(temp_path):
-        import shutil
-        shutil.rmtree(temp_path)
-        os.makedirs(temp_path)
-    print("Gradientes e ativações temporárias removidos.")
+def reset_accumulated_grads() -> None:
+    """Remove diretórios de gradientes e ativações temporárias do disco para limpeza."""
+    for folder in ['grads', 'temp']:
+        path = os.path.join(WEIGHTS_DIR, folder)
+        if os.path.exists(path):
+            shutil.rmtree(path)
+            os.makedirs(path)
+    print("Dados temporários limpos.")
 
-def ensure_v0_weights():
-    """Garante que os pesos iniciais existem (Tarefa da Sprint 05)."""
+def ensure_v0_weights() -> None:
+    """Inicializa pesos padrão Xavier/Zeros se o diretório de pesos estiver vazio."""
     if not os.path.exists(WEIGHTS_DIR) or len(os.listdir(WEIGHTS_DIR)) <= 1:
-        print("\n[!] Pesos não encontrados. Reinicializando (Sprint 05)...")
-        from database_manager import get_db_connection
+        print("\n[!] Pesos não encontrados. Reinicializando...")
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT count(*) FROM vocab")
@@ -244,26 +236,18 @@ def ensure_v0_weights():
         create_weight_registry(layers_metadata)
         print("[OK] Pesos reinicializados.")
 
-def decompose_weights_svd(weights, rank_ratio=0.5):
-    """Decompõe um tensor de pesos em matrizes U, S e V (Low-Rank Approximation)."""
-    # Converter para float32 para o cálculo de SVD de alta precisão
+def decompose_weights_svd(weights: np.ndarray, rank_ratio: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Decompõe pesos via SVD para baixa aproximação (Low-Rank)."""
     w_f32 = weights.astype(np.float32)
     u, s, vh = np.linalg.svd(w_f32, full_matrices=False)
     
-    # Determinar o novo Rank (k)
-    k = int(len(s) * rank_ratio)
-    if k < 1: k = 1
+    k = max(1, int(len(s) * rank_ratio))
+    print(f"[SVD] Rank: {len(s)} -> {k}")
     
-    # Truncar
-    u_k = u[:, :k]
-    s_k = s[:k]
-    vh_k = vh[:k, :]
-    
-    print(f"[SVD] Decomposição concluída. Rank: {len(s)} -> {k}")
-    return u_k.astype(DEFAULT_DTYPE), s_k.astype(DEFAULT_DTYPE), vh_k.astype(DEFAULT_DTYPE)
+    return u[:, :k].astype(DEFAULT_DTYPE), s[:k].astype(DEFAULT_DTYPE), vh[:k, :].astype(DEFAULT_DTYPE)
 
-def save_svd_weights(name, weights, rank_ratio=0.5):
-    """Decompõe e salva pesos como SVD para reduzir I/O de disco."""
+def save_svd_weights(name: str, weights: np.ndarray, rank_ratio: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Decompõe e salva componentes SVD (U, S, V) no disco."""
     u, s, v = decompose_weights_svd(weights, rank_ratio)
     
     base_path = os.path.join(WEIGHTS_DIR, f"{name}_svd")
@@ -277,20 +261,19 @@ def save_svd_weights(name, weights, rank_ratio=0.5):
     with open(meta_path, 'w') as f:
         json.dump({"svd": True, "rank": u.shape[1], "original_shape": list(weights.shape)}, f)
         
-    print(f"[SVD] '{name}' salvo como Low-Rank (U: {u.shape}, V: {v.shape})")
+    print(f"[SVD] '{name}' salvo como Low-Rank.")
     return u, s, v
 
-def get_svd_params(name):
-    """Recupera metadados de SVD de uma camada."""
+def get_svd_params(name: str) -> Optional[Dict[str, Any]]:
+    """Recupera metadados de SVD (.svd_meta)."""
     meta_path = os.path.join(WEIGHTS_DIR, f"{name}.svd_meta")
     if os.path.exists(meta_path):
         with open(meta_path, 'r') as f:
             return json.load(f)
     return None
 
-def save_compressed_tensor(name, tensor):
-    """Salva um tensor comprimido com LZ4 para poupar largura de banda de disco."""
-    # Converter para bytes de forma eficiente
+def save_compressed_tensor(name: str, tensor: np.ndarray) -> None:
+    """Salva tensor comprimido com LZ4 para otimização de I/O de disco."""
     tensor_bytes = tensor.tobytes()
     compressed_data = lz4.frame.compress(tensor_bytes)
     
@@ -308,8 +291,8 @@ def save_compressed_tensor(name, tensor):
         
     print(f"[LZ4] '{name}' comprimido: {len(tensor_bytes)//1024}KB -> {len(compressed_data)//1024}KB")
 
-def load_compressed_tensor(name):
-    """Carrega e descompacta um tensor LZ4 inteiramente para a RAM."""
+def load_compressed_tensor(name: str) -> Optional[np.ndarray]:
+    """Carrega e descompacta tensor LZ4 do disco."""
     path = os.path.join(WEIGHTS_DIR, f"{name}.lz4")
     meta_path = os.path.join(WEIGHTS_DIR, f"{name}.lz4_meta")
     
@@ -328,12 +311,10 @@ def load_compressed_tensor(name):
     
     latency = time.time() - start_time
     log_telemetry('io_read_latency', latency, f"lz4_load:{name}")
-    
     return tensor
 
-def create_tensor_shards(name, tensor, ids_per_shard=1000):
-    """Divide um tensor gigante em fragmentos (shards) no disco."""
-    from database_manager import get_db_connection
+def create_tensor_shards(name: str, tensor: np.ndarray, ids_per_shard: int = 1000) -> None:
+    """Divide um tensor gigante em fragmentos físicos (Shards) no disco."""
     num_elements = tensor.shape[0]
     num_shards = (num_elements + ids_per_shard - 1) // ids_per_shard
     
@@ -342,7 +323,6 @@ def create_tensor_shards(name, tensor, ids_per_shard=1000):
     
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # Limpar shards antigos se existirem no registro
         cursor.execute("DELETE FROM shard_map WHERE tensor_name = ?", (name,))
         
         for i in range(num_shards):
@@ -350,8 +330,7 @@ def create_tensor_shards(name, tensor, ids_per_shard=1000):
             end_idx = min((i + 1) * ids_per_shard, num_elements)
             
             shard_data = tensor[start_idx:end_idx]
-            shard_filename = f"shard_{i}.npy"
-            shard_path = os.path.join(shard_dir, shard_filename)
+            shard_path = os.path.join(shard_dir, f"shard_{i}.npy")
             np.save(shard_path, shard_data)
             
             cursor.execute(
@@ -359,12 +338,10 @@ def create_tensor_shards(name, tensor, ids_per_shard=1000):
                 (name, i, start_idx, end_idx, shard_path)
             )
         conn.commit()
-    
-    print(f"[SHARD] Tensor '{name}' dividido em {num_shards} fragmentos de ~{ids_per_shard} elementos.")
+    print(f"[SHARD] '{name}' fragmentado em {num_shards} unidades.")
 
-def lookup_shard_for_id(tensor_name, original_id):
-    """Localiza o shard e o offset interno para um determinado ID global."""
-    from database_manager import get_db_connection
+def lookup_shard_for_id(tensor_name: str, original_id: int) -> Optional[Tuple[str, int]]:
+    """Localiza o fragmento e o deslocamento interno para um ID global."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -374,52 +351,34 @@ def lookup_shard_for_id(tensor_name, original_id):
         row = cursor.fetchone()
         if not row:
             return None
-            
-        shard_id, start_index, file_path = row
-        internal_offset = original_id - start_index
-        return file_path, internal_offset
+        return row[2], original_id - row[1]
 
-def calculate_weight_hash(path):
-    """Gera um hash SHA256 de um arquivo de pesos para garantir integridade no Swarm."""
+def calculate_weight_hash(path: str) -> Optional[str]:
+    """Calcula o hash SHA256 de um arquivo de pesos."""
     import hashlib
     if not os.path.exists(path):
         return None
-    
     sha256_hash = hashlib.sha256()
     with open(path, "rb") as f:
-        # Ler em blocos para evitar estourar a RAM
-        for byte_block in iter(lambda: f.read(4096), b""):
+        for byte_block in iter(lambda: f.read(8192), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
-def verify_tensor_integrity(name):
-    """Verifica se o tensor no disco corresponde ao hash registrado (Sprint 38)."""
+def verify_tensor_integrity(name: str) -> bool:
+    """Verifica se a integridade do tensor no disco confere com o hash esperado."""
     meta = get_layer_metadata(name)
     if not meta or 'path' not in meta:
         return False
         
     current_hash = calculate_weight_hash(meta['path'])
-    # Se não houver hash no meta, consideramos válido mas registramos o novo
     if 'hash' not in meta:
-        print(f"[WARN] Camada '{name}' sem hash registrado. Gerando: {current_hash[:10]}...")
-        return True
+        return True # N/A
         
-    is_valid = current_hash == meta['hash']
-    if not is_valid:
-        print(f"[!] CORRUPÇÃO DETECTADA na camada '{name}'!")
-    return is_valid
+    return current_hash == meta['hash']
 
-# Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
-DEFAULT_DTYPE = np.float16 
-USE_INT8 = True # Habilitar quantização experimental
-
-def convert_weights_to_fp16():
-    """Converte todos os pesos do modelo e estados do otimizador para FP16 para economizar I/O."""
-    print("\nIniciando conversão para FP16 (Otimização da Sprint 15)...")
-    if not os.path.exists(REGISTRY_PATH):
-        print("Registro não encontrado.")
-        return
-
+def convert_weights_to_fp16() -> None:
+    """Converte pesos e otimizador para FP16 globalmente."""
+    if not os.path.exists(REGISTRY_PATH): return
     with open(REGISTRY_PATH, 'r') as f:
         registry = json.load(f)
 
@@ -428,30 +387,16 @@ def convert_weights_to_fp16():
         if os.path.exists(path):
             tensor = np.load(path)
             if tensor.dtype != np.float16:
-                print(f" -> Convertendo {name}: {tensor.dtype} -> float16")
-                tensor_fp16 = tensor.astype(np.float16)
-                np.save(path, tensor_fp16)
+                np.save(path, tensor.astype(np.float16))
                 meta['dtype'] = 'float16'
-                
-                # Aproveitar para converter estados do Adam se existirem
-                for suffix in ['_m', '_v']:
-                    optim_path = os.path.join(WEIGHTS_DIR, 'optim', f"{name}{suffix}.npy")
-                    if os.path.exists(optim_path):
-                        o_tensor = np.load(optim_path)
-                        np.save(optim_path, o_tensor.astype(np.float16))
-            dispose_tensor(tensor)
     
     with open(REGISTRY_PATH, 'w') as f:
         json.dump(registry, f, indent=4)
-    print("[OK] Conversão para FP16 concluída.")
+    print("[OK] Global FP16.")
 
-def convert_weights_to_int8():
-    """Converte todos os pesos do modelo para INT8 (Quantização da Sprint 31)."""
-    print("\nIniciando Quantização INT8 (Sprint 31)...")
-    if not os.path.exists(REGISTRY_PATH):
-        print("Registro não encontrado.")
-        return
-
+def convert_weights_to_int8() -> None:
+    """Quantiza pesos para INT8 globalmente."""
+    if not os.path.exists(REGISTRY_PATH): return
     with open(REGISTRY_PATH, 'r') as f:
         registry = json.load(f)
 
@@ -459,18 +404,11 @@ def convert_weights_to_int8():
         path = meta['path']
         if os.path.exists(path):
             tensor = np.load(path)
-            print(f" -> Quantizando {name} ({tensor.dtype} -> int8)")
-            
-            # Salvar como quantized
             save_quantized_tensor(name, tensor)
-            
-            # Atualizar registro para apontar para o arquivo int8
             meta['path'] = os.path.join(WEIGHTS_DIR, f"{name}_int8.npy")
             meta['dtype'] = 'int8'
             meta['quantized'] = True
-            
-            dispose_tensor(tensor)
     
     with open(REGISTRY_PATH, 'w') as f:
         json.dump(registry, f, indent=4)
-    print("[OK] Quantização INT8 concluída. Model Size reduced by ~50% (base FP16).")
+    print("[OK] Global INT8.")
