@@ -1,5 +1,9 @@
-from tensor_manager import load_tensor_mmap, dispose_tensor, get_quant_params, dequantize_from_int8
+from tensor_manager import (
+    load_tensor_mmap, dispose_tensor, get_quant_params, 
+    dequantize_from_int8, get_svd_params, WEIGHTS_DIR
+)
 import numpy as np
+import os
 
 def relu(x):
     """Função de Ativação ReLU."""
@@ -69,19 +73,38 @@ def apply_behavioral_bias(embeddings, bias_name):
 def dense_layer_forward(input_tensor, weights_name, bias_name=None, activation='relu'):
     """
     Executa o Forward de uma camada densa carregando pesos sob demanda.
+    Suporta SVD (Aproximação de Baixo Rank) e Quantização INT8.
     """
-    # 1. Carregar pesos e bias via MMap
-    weights_mmap = load_tensor_mmap(weights_name)
-    
-    # 2. Dequantizar se necessário (Sprint 31)
-    q_params = get_quant_params(weights_name)
-    if q_params and q_params.get('quantized'):
-        weights = dequantize_from_int8(weights_mmap, q_params['scale'], q_params['zero_point'])
+    # 0. Checar se existe SVD para esta camada (Prioridade de I/O)
+    svd_meta = get_svd_params(weights_name)
+    if svd_meta and svd_meta.get('svd'):
+        # Forward via Low-Rank: x * (U * S * V) -> (x * U) * (S * V) ou similar
+        # Aqui fazemos: (input * U) * (diag(S) * V)
+        u = np.load(os.path.join(WEIGHTS_DIR, f"{weights_name}_svd", "u.npy"), mmap_mode='r')
+        s = np.load(os.path.join(WEIGHTS_DIR, f"{weights_name}_svd", "s.npy"), mmap_mode='r')
+        v = np.load(os.path.join(WEIGHTS_DIR, f"{weights_name}_svd", "v.npy"), mmap_mode='r')
+        
+        # Produto aproximado
+        # Passo 1: input * U
+        inter = np.dot(input_tensor, u)
+        # Passo 2: inter * (diag(S) * V)
+        output = np.dot(inter, np.diag(s) @ v)
+        
+        dispose_tensor(u); dispose_tensor(s); dispose_tensor(v)
     else:
-        weights = weights_mmap
+        # 1. Carregar pesos e bias via MMap (Fluxo Normal ou Quantizado)
+        weights_mmap = load_tensor_mmap(weights_name)
+        
+        # 2. Dequantizar se necessário
+        q_params = get_quant_params(weights_name)
+        if q_params and q_params.get('quantized'):
+            weights = dequantize_from_int8(weights_mmap, q_params['scale'], q_params['zero_point'])
+        else:
+            weights = weights_mmap
 
-    # 3. Operação de Produto Escalar (Dot Product)
-    output = np.dot(input_tensor, weights)
+        # 3. Operação de Produto Escalar (Dot Product)
+        output = np.dot(input_tensor, weights)
+        dispose_tensor(weights)
     
     # 4. Aplicar Bias se existir
     if bias_name:
@@ -91,9 +114,6 @@ def dense_layer_forward(input_tensor, weights_name, bias_name=None, activation='
         
     # 5. Aplicar Ativação
     output = apply_activation(output, activation)
-    
-    # 6. Limpeza de memória dos pesos gigantes
-    dispose_tensor(weights)
     
     return output
 

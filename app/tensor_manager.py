@@ -243,6 +243,50 @@ def ensure_v0_weights():
         create_weight_registry(layers_metadata)
         print("[OK] Pesos reinicializados.")
 
+def decompose_weights_svd(weights, rank_ratio=0.5):
+    """Decompõe um tensor de pesos em matrizes U, S e V (Low-Rank Approximation)."""
+    # Converter para float32 para o cálculo de SVD de alta precisão
+    w_f32 = weights.astype(np.float32)
+    u, s, vh = np.linalg.svd(w_f32, full_matrices=False)
+    
+    # Determinar o novo Rank (k)
+    k = int(len(s) * rank_ratio)
+    if k < 1: k = 1
+    
+    # Truncar
+    u_k = u[:, :k]
+    s_k = s[:k]
+    vh_k = vh[:k, :]
+    
+    print(f"[SVD] Decomposição concluída. Rank: {len(s)} -> {k}")
+    return u_k.astype(DEFAULT_DTYPE), s_k.astype(DEFAULT_DTYPE), vh_k.astype(DEFAULT_DTYPE)
+
+def save_svd_weights(name, weights, rank_ratio=0.5):
+    """Decompõe e salva pesos como SVD para reduzir I/O de disco."""
+    u, s, v = decompose_weights_svd(weights, rank_ratio)
+    
+    base_path = os.path.join(WEIGHTS_DIR, f"{name}_svd")
+    os.makedirs(base_path, exist_ok=True)
+    
+    np.save(os.path.join(base_path, "u.npy"), u)
+    np.save(os.path.join(base_path, "s.npy"), s)
+    np.save(os.path.join(base_path, "v.npy"), v)
+    
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.svd_meta")
+    with open(meta_path, 'w') as f:
+        json.dump({"svd": True, "rank": u.shape[1], "original_shape": list(weights.shape)}, f)
+        
+    print(f"[SVD] '{name}' salvo como Low-Rank (U: {u.shape}, V: {v.shape})")
+    return u, s, v
+
+def get_svd_params(name):
+    """Recupera metadados de SVD de uma camada."""
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.svd_meta")
+    if os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            return json.load(f)
+    return None
+
 # Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
 DEFAULT_DTYPE = np.float16 
 USE_INT8 = True # Habilitar quantização experimental
