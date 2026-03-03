@@ -15,6 +15,23 @@ REGISTRY_PATH: str = os.path.join(WEIGHTS_DIR, 'weight_registry.json')
 DEFAULT_DTYPE = np.float16 
 USE_INT8: bool = True # Habilitar quantização experimental
 
+# Dicionário para controlar camadas congeladas (Fine-tuning)
+FROZEN_LAYERS: Dict[str, bool] = {}
+
+def freeze_layer(name: str) -> None:
+    """Impede que uma camada seja atualizada durante o treinamento (Fine-tuning)."""
+    FROZEN_LAYERS[name] = True
+    print(f"[FINE-TUNING] Camada '{name}' CONGELADA.")
+
+def unfreeze_layer(name: str) -> None:
+    """Permite a atualização de uma camada específica."""
+    FROZEN_LAYERS.pop(name, None)
+    print(f"[FINE-TUNING] Camada '{name}' DESCONGELADA.")
+
+def is_layer_frozen(name: str) -> bool:
+    """Verifica se a camada está no modo Read-Only."""
+    return FROZEN_LAYERS.get(name, False)
+
 def ensure_weights_dir() -> None:
     """Garante que o diretório de pesos exista no sistema de arquivos."""
     os.makedirs(WEIGHTS_DIR, exist_ok=True)
@@ -412,3 +429,64 @@ def convert_weights_to_int8() -> None:
     with open(REGISTRY_PATH, 'w') as f:
         json.dump(registry, f, indent=4)
     print("[OK] Global INT8.")
+
+def save_model_checkpoint(checkpoint_name: str) -> str:
+    """
+    Cria um snapshot completo do modelo (Pesos, Vocab e Registro) para uso posterior ou fine-tuning.
+    """
+    checkpoint_dir = os.path.join(os.path.dirname(WEIGHTS_DIR), 'checkpoints', checkpoint_name)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    # 1. Copiar Pesos
+    dest_weights = os.path.join(checkpoint_dir, 'weights')
+    if os.path.exists(WEIGHTS_DIR):
+        if os.path.exists(dest_weights):
+            shutil.rmtree(dest_weights)
+        shutil.copytree(WEIGHTS_DIR, dest_weights, ignore=shutil.ignore_patterns('temp', 'grads'))
+    
+    # 2. Copiar Banco de Dados (Vocab)
+    from database_manager import DB_PATH
+    shutil.copy2(DB_PATH, os.path.join(checkpoint_dir, 'vocab.db'))
+    
+    # 3. Gerar Manifesto
+    manifest = {
+        "checkpoint_id": checkpoint_name,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "frozen_layers": list(FROZEN_LAYERS.keys())
+    }
+    with open(os.path.join(checkpoint_dir, 'manifest.json'), 'w') as f:
+        json.dump(manifest, f, indent=4)
+        
+    print(f"[CHECKPOINT] Modelo salvo com sucesso em: {checkpoint_dir}")
+    return checkpoint_dir
+
+def load_model_checkpoint(checkpoint_name: str) -> bool:
+    """
+    Restaura um checkpoint anterior, substituindo os pesos e o vocab atual.
+    """
+    checkpoint_dir = os.path.join(os.path.dirname(WEIGHTS_DIR), 'checkpoints', checkpoint_name)
+    if not os.path.exists(checkpoint_dir):
+        print(f"[ERRO] Checkpoint '{checkpoint_name}' não encontrado.")
+        return False
+    
+    # Restaura Pesos
+    src_weights = os.path.join(checkpoint_dir, 'weights')
+    if os.path.exists(src_weights):
+        if os.path.exists(WEIGHTS_DIR):
+            shutil.rmtree(WEIGHTS_DIR)
+        shutil.copytree(src_weights, WEIGHTS_DIR)
+        
+    # Restaura Vocab
+    from database_manager import DB_PATH
+    shutil.copy2(os.path.join(checkpoint_dir, 'vocab.db'), DB_PATH)
+    
+    # Restaura estado de Fine-tuning se houver no manifesto
+    manifest_path = os.path.join(checkpoint_dir, 'manifest.json')
+    if os.path.exists(manifest_path):
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+            global FROZEN_LAYERS
+            FROZEN_LAYERS = {layer: True for layer in manifest.get('frozen_layers', [])}
+            
+    print(f"[RELOAD] Modelo '{checkpoint_name}' carregado e pronto para uso/fine-tuning.")
+    return True
