@@ -150,24 +150,48 @@ def get_quant_params(name):
             return json.load(f)
     return None
 
-def store_tensor_disk(name, tensor, folder='temp'):
+def store_tensor_disk(name, tensor, folder='temp', quantize=False):
     """Salva um tensor temporário (gradiente ou ativação) no disco."""
     path = os.path.join(WEIGHTS_DIR, folder)
     os.makedirs(path, exist_ok=True)
-    file_path = os.path.join(path, f"{name}.npy")
+    
     start_time = time.time()
-    np.save(file_path, tensor)
+    
+    if quantize:
+        q_tensor, scale, zp = quantize_to_int8(tensor)
+        file_path = os.path.join(path, f"{name}_q.npy")
+        np.save(file_path, q_tensor)
+        # Salvar escala localmente no nome do arquivo ou arquivo meta
+        meta_path = os.path.join(path, f"{name}_q.meta")
+        with open(meta_path, 'w') as f:
+            json.dump({"scale": scale, "zero_point": zp}, f)
+    else:
+        file_path = os.path.join(path, f"{name}.npy")
+        np.save(file_path, tensor)
+        
     latency = time.time() - start_time
     log_telemetry('io_write_latency', latency, f"temp:{name}")
     return file_path
 
 def load_tensor_disk(name, folder='temp'):
-    """Carrega um tensor temporário do disco."""
-    file_path = os.path.join(WEIGHTS_DIR, folder, f"{name}.npy")
-    if not os.path.exists(file_path):
-        return None
+    """Carrega um tensor temporário do disco, checando por versão quantizada primeiro."""
+    path = os.path.join(WEIGHTS_DIR, folder)
+    q_file_path = os.path.join(path, f"{name}_q.npy")
+    file_path = os.path.join(path, f"{name}.npy")
+    
     start_time = time.time()
-    tensor = np.load(file_path)
+    
+    if os.path.exists(q_file_path):
+        q_tensor = np.load(q_file_path)
+        meta_path = os.path.join(path, f"{name}_q.meta")
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+        tensor = dequantize_from_int8(q_tensor, meta['scale'], meta['zero_point'])
+    elif os.path.exists(file_path):
+        tensor = np.load(file_path)
+    else:
+        return None
+        
     latency = time.time() - start_time
     log_telemetry('io_read_latency', latency, f"temp_load:{name}")
     return tensor
