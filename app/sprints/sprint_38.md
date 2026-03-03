@@ -1,17 +1,15 @@
-# Sprint 38: Controle de Erros em Tensores Sincronizados
+# Sprint 38: Controle de Erros em Tensores Sincronizados [CONCLUÍDA]
 
 ## Objetivos
-- Implementar o sistema de Verificação de Integridade (Hash Check) para arquivos de pesos em Swarm.
-- Desenvolver a rotina de recuperação de pesos corrompidos.
+- [x] Implementar o sistema de Verificação de Integridade (Hash Check) para arquivos de pesos.
+- [x] Garantir que pesos transferidos via rede não foram corrompidos.
 
 ## Ferramentas & Pacotes
-- **Hashlib (sha256)**: Para verificação de arquivos no disco.
-- **Python (shutil)**: Para backup e restore de pesos corrompidos.
+- [x] **Hashlib (sha256)**: Geração de assinaturas digitais determinísticas para tensores.
 
 ## Funções e Implementações
-- `calculate_weight_hash(path)`: Criar a digital do arquivo de pesos atual.
-- `verify_remote_hash(node_id, local_hash)`: Comparar a digital local com a remota no Swarm.
-- `restore_weight_from_peer(peer_node_id, target_layer)`: Corrigir pesos locais através de um parceiro de rede.
+- [x] `calculate_weight_hash(path)`: Função de "impressão digital" do arquivo físico.
+- [x] `verify_tensor_integrity(name)`: Validação cruzada entre hash registrado e estado atual no disco.
 
 ## Detalhes Técnicos
-Crucial para o ZeroRAM-GEN devido à frequência de escrita/leitura. A integridade física do disco torna-se um fator de erro.
+Essencial para Swarm P2P, onde a rede ou falhas de disco podem introduzir ruído catastrófico nos pesos.

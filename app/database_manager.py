@@ -105,6 +105,20 @@ def init_db():
                 PRIMARY KEY (tensor_name, shard_id)
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS network_nodes (
+                node_id TEXT PRIMARY KEY,
+                base_url TEXT,
+                status TEXT,
+                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS swarm_stats (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
         # Inserir tokens especiais se não existirem
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         special_tokens = [

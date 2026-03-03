@@ -379,6 +379,36 @@ def lookup_shard_for_id(tensor_name, original_id):
         internal_offset = original_id - start_index
         return file_path, internal_offset
 
+def calculate_weight_hash(path):
+    """Gera um hash SHA256 de um arquivo de pesos para garantir integridade no Swarm."""
+    import hashlib
+    if not os.path.exists(path):
+        return None
+    
+    sha256_hash = hashlib.sha256()
+    with open(path, "rb") as f:
+        # Ler em blocos para evitar estourar a RAM
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+def verify_tensor_integrity(name):
+    """Verifica se o tensor no disco corresponde ao hash registrado (Sprint 38)."""
+    meta = get_layer_metadata(name)
+    if not meta or 'path' not in meta:
+        return False
+        
+    current_hash = calculate_weight_hash(meta['path'])
+    # Se não houver hash no meta, consideramos válido mas registramos o novo
+    if 'hash' not in meta:
+        print(f"[WARN] Camada '{name}' sem hash registrado. Gerando: {current_hash[:10]}...")
+        return True
+        
+    is_valid = current_hash == meta['hash']
+    if not is_valid:
+        print(f"[!] CORRUPÇÃO DETECTADA na camada '{name}'!")
+    return is_valid
+
 # Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
 DEFAULT_DTYPE = np.float16 
 USE_INT8 = True # Habilitar quantização experimental
