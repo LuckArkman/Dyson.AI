@@ -76,6 +76,21 @@ def load_tensor_disk(name, folder='temp'):
         return None
     return np.load(file_path)
 
+def reset_accumulated_grads():
+    """Remove todos os gradientes temporários do disco."""
+    path = os.path.join(WEIGHTS_DIR, 'grads')
+    if os.path.exists(path):
+        import shutil
+        shutil.rmtree(path)
+        os.makedirs(path)
+    # Também limpar pasta temp (ativações)
+    temp_path = os.path.join(WEIGHTS_DIR, 'temp')
+    if os.path.exists(temp_path):
+        import shutil
+        shutil.rmtree(temp_path)
+        os.makedirs(temp_path)
+    print("Gradientes e ativações temporárias removidos.")
+
 def ensure_v0_weights():
     """Garante que os pesos iniciais existem (Tarefa da Sprint 05)."""
     if not os.path.exists(WEIGHTS_DIR) or len(os.listdir(WEIGHTS_DIR)) <= 1:

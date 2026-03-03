@@ -101,26 +101,39 @@ def compute_output_gradient(probabilities, target_ids):
     grad = grad / batch_size
     return grad
 
-def backward_layer_step(grad_out, weights_name, forward_input, activation='relu'):
+def backward_layer_step(grad_out, weights_name, forward_input):
     """
-    Calcula gradientes para pesos e para a entrada da camada (retropropagação).
+    Calcula gradientes para pesos, bias e para a entrada da camada.
     """
     from tensor_manager import load_tensor_mmap, dispose_tensor
-    
-    # Se houver ativação, aplicar derivada (Assumindo que grad_out já é dL/dy)
-    # Nota: No ZeroRAM, o 'z' (XW+b) deve ser recarregado se a derivada depender dele.
-    # Para ReLU, se forward_input for a saída da camada anterior e weights forem W,
-    # então output_z = dot(forward_input, W). 
-    # Simplificação: grad_out já chega como gradiente em relação a Z se for a última camada.
     
     weights = load_tensor_mmap(weights_name)
     
     # dL/dW = X.T @ grad_out
     grad_w = np.dot(forward_input.T, grad_out)
     
+    # dL/db = sum(grad_out) ao longo do eixo do batch
+    grad_b = np.sum(grad_out, axis=0) if grad_out.ndim > 1 else grad_out
+    
     # dL/dX = grad_out @ W.T
     grad_x = np.dot(grad_out, weights.T)
     
     dispose_tensor(weights)
     
-    return grad_w, grad_x
+    return grad_w, grad_b, grad_x
+
+def accumulate_embedding_grad(token_ids, grad_emb_input, vocab_size, embed_dim):
+    """
+    Calcula o gradiente esparso para a matriz de embeddings.
+    token_ids: IDs usados no forward pass.
+    grad_emb_input: Gradiente vindo da camada superior (dL/dEmbed).
+    """
+    # No ZeroRAM, o gradiente do embedding é uma matriz (vocab_size, embed_dim)
+    # mas quase toda é zero. Aqui criamos a versão esparsa (apenas fatias).
+    grad_matrix = np.zeros((vocab_size, embed_dim), dtype=np.float32)
+    
+    # Para cada token ID no batch, acumulamos o gradiente correspondente
+    for i, tid in enumerate(token_ids):
+        grad_matrix[tid] += grad_emb_input[i]
+        
+    return grad_matrix
