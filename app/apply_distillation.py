@@ -22,11 +22,19 @@ def main():
     from database_manager import get_db_connection
     with get_db_connection() as conn:
         conn.execute("DELETE FROM gold_data") # Limpar treinamentos antigos
+        conn.execute("INSERT OR REPLACE INTO train_state (key, value) VALUES ('adam_t', '1')")
         conn.commit()
         
+    from tensor_manager import WEIGHTS_DIR
+    import shutil
+    for folder in ['optim', 'grads']:
+        path = os.path.join(WEIGHTS_DIR, folder)
+        if os.path.exists(path): shutil.rmtree(path)
+        os.makedirs(path, exist_ok=True)
+    
     pt_corpus = r"c:\Users\MPLopes\Documents\Dyson.AI\app\Dayson\pt_0.txt"
     print(f"\n[STEP 2] Refinando amostras de '{pt_corpus}' usando Gemini...")
-    batch_distillation(pt_corpus, GEMINI_API_KEY, num_samples=20)
+    batch_distillation(pt_corpus, GEMINI_API_KEY, num_samples=5)
     
     # Conferir se os dados foram realmente salvos
     with get_db_connection() as conn:

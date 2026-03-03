@@ -301,12 +301,19 @@ def accumulate_embedding_grad(grad_emb: np.ndarray, token_ids: np.ndarray, weigh
     from tensor_manager import store_tensor_disk, get_layer_metadata, WEIGHTS_DIR
     
     grad_path = os.path.join(WEIGHTS_DIR, 'grads', f"{weights_name}_dw.npy")
+    meta = get_layer_metadata(weights_name)
+    expected_shape = meta['shape']
     
     if os.path.exists(grad_path):
         existing_grad = np.load(grad_path).astype(np.float32)
+        # BUG FIX: Se o modelo foi expandido, mas o dw.npy persistente não, expandimos agora
+        if existing_grad.shape[0] < expected_shape[0]:
+            print(f"[RECOVERY] Gradiente '{weights_name}' menor que o modelo. Expandindo...")
+            new_grad = np.zeros(expected_shape, dtype=np.float32)
+            new_grad[:existing_grad.shape[0]] = existing_grad
+            existing_grad = new_grad
     else:
-        meta = get_layer_metadata(weights_name)
-        existing_grad = np.zeros(meta['shape'], dtype=np.float32)
+        existing_grad = np.zeros(expected_shape, dtype=np.float32)
     
     # Acumular gradientes apenas para os IDs que estiveram no batch
     # grad_emb: (batch, seq, dim), token_ids: (batch, seq)

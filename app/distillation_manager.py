@@ -12,8 +12,8 @@ def request_golden_data(prompt, api_key=None):
 
     try:
         genai.configure(api_key=api_key)
-        # Utilizando a versão sugerida pelo usuário (2.5 Flash Lite)
-        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        # Usando a versão Gemini 3 Flash como alternativa estável
+        model = genai.GenerativeModel('gemini-3-flash-preview')
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
@@ -49,14 +49,19 @@ def batch_distillation(data_path, api_key, num_samples=10):
     for original in samples:
         # Prompt de refinamento
         prompt = (
-            "Refine este texto para que seja mais robusto, profundo, elaborado e gramaticalmente perfeito em português. "
-            "Mantenha o sentido original, mas use um tom mais profissional e técnico se apropriado.\n\n"
-            f"Texto original: {original}\n\n"
-            "Texto refinado:"
+            f"Refine este texto para que seja mais robusto, profundo, elaborado e gramaticalmente perfeito em português. "
+            f"IMPORTANTE: Forneça APENAS o texto refinado, sem introduções, explicações, markdown ou campos extras. "
+            f"O resultado deve ser puramente a versão melhorada do texto original.\n\n"
+            f"Original: {original}\n"
+            f"Refinado:"
         )
         
         print(f"Refinando: {original[:50]}...")
         refined = request_golden_data(prompt, api_key=api_key)
+        
+        # Respeitar limite de 10 RPM (1 a cada 6s)
+        import time
+        time.sleep(6)
         
         if refined:
             # Limpar a resposta do Gemini (remover labels se houver)

@@ -11,6 +11,18 @@ from database_manager import log_telemetry, get_db_connection
 WEIGHTS_DIR: str = os.path.join(os.path.dirname(__file__), 'weights')
 REGISTRY_PATH: str = os.path.join(WEIGHTS_DIR, 'weight_registry.json')
 
+def save_layer_metadata(name, meta):
+    """Atualiza o registro JSON com novos metadados."""
+    if not os.path.exists(REGISTRY_PATH):
+        os.makedirs(WEIGHTS_DIR, exist_ok=True)
+        with open(REGISTRY_PATH, 'w') as f: json.dump({"layers": {}}, f)
+        
+    with open(REGISTRY_PATH, 'r') as f:
+        registry = json.load(f)
+    registry['layers'][name] = meta
+    with open(REGISTRY_PATH, 'w') as f:
+        json.dump(registry, f, indent=4)
+
 # Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
 DEFAULT_DTYPE = np.float16 
 USE_INT8: bool = True # Habilitar quantização experimental
@@ -81,14 +93,23 @@ def expand_tensor_if_needed(name: str, new_vocab_size: int) -> None:
         weights = np.load(meta['path'])
     
     # 2. Criar novo shape e inicializar novos pesos
-    new_shape = list(current_shape)
+    actual_size = weights.shape[axis_to_expand]
+    if actual_size >= new_vocab_size:
+        # Sincronizar metadados se estiverem errados
+        if current_shape[axis_to_expand] != actual_size:
+            meta['shape'][axis_to_expand] = actual_size
+            save_layer_metadata(name, meta)
+        return
+
+    new_shape = list(weights.shape)
     new_shape[axis_to_expand] = new_vocab_size
     
     # Inicialização aleatória para os novos tokens
     new_weights = np.random.randn(*new_shape).astype(np.float32) * 0.01
     
     # 3. Copiar pesos antigos para o novo tensor
-    slices = [slice(0, s) for s in current_shape]
+    # Slices baseados no shape REAL dos pesos carregados
+    slices = [slice(0, s) for s in weights.shape]
     new_weights[tuple(slices)] = weights
     
     # 4. Salvar de acordo com o formato original ou converter
@@ -100,23 +121,23 @@ def expand_tensor_if_needed(name: str, new_vocab_size: int) -> None:
         np.save(meta['path'], new_weights.astype(weights.dtype))
         
     meta['shape'] = list(new_weights.shape)
-    
-    # 5. Atualizar registro global
-    with open(REGISTRY_PATH, 'r') as f:
-        registry = json.load(f)
-    registry['layers'][name] = meta
-    with open(REGISTRY_PATH, 'w') as f:
-        json.dump(registry, f, indent=4)
+    save_layer_metadata(name, meta)
         
-    # 6. Expandir estados do otimizador (Adam M e V) se existirem
-    for suffix in ['_m', '_v']:
-        optim_path = os.path.join(WEIGHTS_DIR, 'optim', f"{name}{suffix}.npy")
+    # 6. Expandir estados do otimizador (Adam M e V) e Gradientes se existirem
+    for suffix in ['_m', '_v', '_dw']:
+        folder = 'optim' if suffix != '_dw' else 'grads'
+        optim_path = os.path.join(WEIGHTS_DIR, folder, f"{name}{suffix}.npy")
         if os.path.exists(optim_path):
             old_optim = np.load(optim_path)
-            # Expandir estados com zeros (novo aprendizado)
-            new_optim = np.zeros(new_shape, dtype=old_optim.dtype)
-            new_optim[tuple(slices)] = old_optim
-            np.save(optim_path, new_optim)
+            # Garantir que old_optim bata com o shape esperado para o slice
+            if old_optim.shape[axis_to_expand] < new_vocab_size:
+                new_optim = np.zeros(new_shape, dtype=old_optim.dtype)
+                # Criar fatias baseadas no shape atual do otimizador
+                old_shape = list(old_optim.shape)
+                sub_slices = [slice(0, s) for s in old_shape]
+                new_optim[tuple(sub_slices)] = old_optim
+                np.save(optim_path, new_optim)
+                print(f" [OK] Estado/Gradiente {suffix} expandido.")
             
     print(f"[OK] Camada '{name}' expandida com sucesso.")
 
