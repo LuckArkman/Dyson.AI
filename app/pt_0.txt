@@ -1,0 +1,10 @@
+O projeto ZeroRAM-GEN é uma revolução na inteligência artificial distribuída. 
+A rede Dyson permite que modelos de linguagem rodem inteiramente a partir do disco rígido.
+Isso elimina a necessidade de grandes quantidades de memória RAM cara.
+O treinamento em português é essencial para que o sistema entenda os usuários do Brasil.
+A eficiência de I/O é a chave para a baixa latência no processamento de dados.
+O enxame de dispositivos trabalha em conjunto para sincronizar gradientes.
+Este modelo está agora aprendendo a língua portuguesa de forma estável.
+A infraestrutura Dyson AI é escalável, segura e focada em performance de baixo custo.
+Estamos realizando um fine-tuning para adaptação linguística agora.
+O ZeroRAM-GEN agora compreende e responde corretamente em português.

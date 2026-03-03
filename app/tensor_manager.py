@@ -32,9 +32,75 @@ def is_layer_frozen(name: str) -> bool:
     """Verifica se a camada está no modo Read-Only."""
     return FROZEN_LAYERS.get(name, False)
 
-def ensure_weights_dir() -> None:
-    """Garante que o diretório de pesos exista no sistema de arquivos."""
-    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+def expand_tensor_if_needed(name: str, new_vocab_size: int) -> None:
+    """
+    Expande um tensor (Embedding ou Output) para acomodar um novo tamanho de vocabulário.
+    Preserva os pesos existentes e preenche os novos com inicialização aleatória.
+    """
+    meta = get_layer_metadata(name)
+    if not meta:
+        return
+
+    current_shape = list(meta['shape'])
+    axis_to_expand = -1
+    
+    # Decidir qual eixo expandir baseado no nome
+    if name == "embedding_matrix":
+        axis_to_expand = 0
+    elif name == "output_weights":
+        axis_to_expand = 1 # (hidden, vocab)
+    else:
+        return # Não é uma camada dependente de vocab
+
+    if current_shape[axis_to_expand] >= new_vocab_size:
+        return # Já é grande o suficiente
+
+    print(f"[EXPAND] Expandindo '{name}': {current_shape[axis_to_expand]} -> {new_vocab_size}")
+    
+    # 1. Carregar pesos antigos
+    old_weights = np.load(meta['path'])
+    
+    # 2. Criar novo shape
+    new_shape = list(current_shape)
+    new_shape[axis_to_expand] = new_vocab_size
+    
+    # 3. Inicializar novos pesos
+    new_weights = np.random.randn(*new_shape).astype(old_weights.dtype) * 0.01
+    
+    # 4. Copiar pesos antigos para o novo tensor
+    slices = [slice(0, s) for s in current_shape]
+    new_weights[tuple(slices)] = old_weights
+    
+    # 5. Salvar e atualizar registro
+    np.save(meta['path'], new_weights)
+    meta['shape'] = list(new_weights.shape)
+    
+    # Atualizar registro global
+    with open(REGISTRY_PATH, 'r') as f:
+        registry = json.load(f)
+    registry['layers'][name] = meta
+    with open(REGISTRY_PATH, 'w') as f:
+        json.dump(registry, f, indent=4)
+        
+    # 6. Expandir estados do otimizador (Adam M e V) se existirem
+    for suffix in ['_m', '_v']:
+        optim_path = os.path.join(WEIGHTS_DIR, 'optim', f"{name}{suffix}.npy")
+        if os.path.exists(optim_path):
+            old_optim = np.load(optim_path)
+            new_optim = np.zeros(new_shape, dtype=old_optim.dtype)
+            new_optim[tuple(slices)] = old_optim
+            np.save(optim_path, new_optim)
+            
+    print(f"[OK] Camada '{name}' expandida.")
+
+def sync_model_to_vocab() -> None:
+    """Sincroniza as dimensões do modelo com o tamanho atual do vocabulário no SQLite."""
+    from database_manager import get_db_connection
+    with get_db_connection() as conn:
+        vocab_size = conn.execute("SELECT count(*) FROM vocab").fetchone()[0]
+    
+    expand_tensor_if_needed("embedding_matrix", vocab_size)
+    expand_tensor_if_needed("output_weights", vocab_size)
 
 def initialize_layer_weights(shape: Tuple[int, ...], name: str, init_type: str = 'xavier', dtype: Any = np.float32) -> Tuple[str, Tuple[int, ...]]:
     """
