@@ -1,17 +1,17 @@
-# Sprint 14: Otimização de I/O - Pré-fetch de Tensores
+# Sprint 14: Monitoramento de Treinamento e Telemetria
 
 ## Objetivos
-- Implementar o carregamento antecipado (Prefetch) de pesos para a próxima camada enquanto a atual está em cálculo.
-- Reduzir o tempo de espera do CPU durante o acesso a disco.
+- Sistema de Log para monitorar a Loss, Gradientes Norm e Tempo de I/O em tempo real.
+- Desenvolver rotina de alertas para degradação de performance no disco.
 
 ## Ferramentas & Pacotes
-- **Python (threading/asyncio)**: Para carregar pesos em paralelo ao cálculo Forward.
-- **NumPy (Shared Memory)**: Buffer de antecipação.
+- **Python (time, psutil)**: Monitor de latência de leitura/escrita e uso de RAM.
+- **SQLite3 (Metrics)**: Tabela `TELEMETRY`.
 
 ## Funções e Implementações
-- `prefetch_next_layer_weights(layer_index)`: Inicia leitura do arquivo de pesos em thread separada.
-- `async_save_weights(data, path)`: Salvar pesos sem bloquear o loop principal.
-- `wait_for_io_ready(target_path)`: Sincronização de threads.
+- `measure_io_latency(fn, *args)`: Decorador para medir tempo das funções de carregamento/salvamento de pesos.
+- `calculate_perf_stats()`: Resumo de tokens por segundo (TPS) e tempo de treinamento esperado.
+- `early_stopping_check(loss_delta)`: Critério para pausa automática de treino.
 
 ## Detalhes Técnicos
-Esta sprint visa mitigar a "Desvantagem de Latência de I/O" citada no White Paper. Minimiza a ociosidade do motor matemático.
+Devido ao custo de I/O inerente ao ZeroRAM, estatísticas de tempo de disco são vitais para futuras otimizações de cache.

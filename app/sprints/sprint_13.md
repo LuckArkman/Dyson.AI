@@ -1,17 +1,16 @@
-# Sprint 13: Monitoramento de Treinamento e Telemetria
+# Sprint 13: Subsistema de Inferência (Text Gen) [CONCLUÍDA]
 
 ## Objetivos
-- Sistema de Log para monitorar a Loss, Gradientes Norm e Tempo de I/O em tempo real.
-- Desenvolver rotina de alertas para degradação de performance no disco.
+- [x] Implementar funções para geração de texto palavra a palavra (auto-regressiva).
+- [x] Desenvolver mecanismos de Sampling (Greedy Search, Temperature, Top-K).
 
 ## Ferramentas & Pacotes
-- **Python (time, psutil)**: Monitor de latência de leitura/escrita e uso de RAM.
-- **SQLite3 (Metrics)**: Tabela `TELEMETRY`.
+- [x] **NumPy**: Para amostragem multinomial de probabilidades.
+- [x] **tokenizer.py**: Conversão de saída do modelo em texto humano.
 
 ## Funções e Implementações
-- `measure_io_latency(fn, *args)`: Decorador para medir tempo das funções de carregamento/salvamento de pesos.
-- `calculate_perf_stats()`: Resumo de tokens por segundo (TPS) e tempo de treinamento esperado.
-- `early_stopping_check(loss_delta)`: Critério para pausa automática de treino.
+- [x] `predict_next_token(ids, temp, top_k)`: Predição isolada de um único token.
+- [x] `generate_text(prompt, max_tokens)`: Loop de geração mantendo contexto.
 
 ## Detalhes Técnicos
-Devido ao custo de I/O inerente ao ZeroRAM, estatísticas de tempo de disco são vitais para futuras otimizações de cache.
+A inferência no ZeroRAM-GEN consome muito pouco recurso de RAM, permitindo rodar em dispositivos extremamente limitados, sacrificando velocidade de geração devido ao I/O de disco a cada token.
