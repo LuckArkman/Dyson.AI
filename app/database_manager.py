@@ -1,14 +1,20 @@
 import sqlite3
 import os
 from contextlib import contextmanager
+from typing import List, Optional, Tuple, Any, Dict, Generator
 
 # Caminho para o banco de dados de vocabulário
-DB_PATH = os.path.join(os.path.dirname(__file__), 'Dayson', 'vocab.db')
+DB_PATH: str = os.path.join(os.path.dirname(__file__), 'Dayson', 'vocab.db')
 
 @contextmanager
-def get_db_connection():
-    """Context manager para conexão segura com o SQLite."""
-    conn = None
+def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
+    """
+    Context manager para conexão segura com o SQLite.
+    
+    Yields:
+        sqlite3.Connection: Conexão ativa com o banco de dados especificado em DB_PATH.
+    """
+    conn: Optional[sqlite3.Connection] = None
     try:
         # Garante que o diretório Dayson existe
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -21,8 +27,12 @@ def get_db_connection():
         if conn:
             conn.close()
 
-def init_db():
-    """Inicializa a tabela VOCAB conforme especificado no White Paper."""
+def init_db() -> None:
+    """
+    Inicializa as tabelas do banco de dados conforme as especificações do ZeroRAM-GEN.
+    Cria as tabelas de vocabulário, logs de treino, telemetria, histórico, biased templates,
+    sessão, dados sintéticos, estatísticas de vocabulário, sharding e rede.
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -121,7 +131,7 @@ def init_db():
         ''')
         # Inserir tokens especiais se não existirem
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
-        special_tokens = [
+        special_tokens: List[Tuple[int, str]] = [
             (1, '<|system|>'),
             (2, '<|user|>'),
             (3, '<|assistant|>'),
@@ -131,29 +141,20 @@ def init_db():
         conn.commit()
     print(f"Banco de Dados Inicializado em: {DB_PATH}")
 
-def get_or_create_id(word):
-    """Retorna o ID de uma palavra ou cria um novo registro se não existir."""
+def bulk_insert_vocab(words: List[str]) -> None:
+    """
+    Insere uma lista de palavras únicas no banco de forma eficiente.
+    
+    Args:
+        words: Lista de strings a serem inseridas no vocabulário.
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM vocab WHERE text = ?", (word,))
-        row = cursor.fetchone()
-        if row:
-            return row[0]
-        else:
-            cursor.execute("INSERT INTO vocab (text) VALUES (?)", (word,))
-            conn.commit()
-            return cursor.lastrowid
-
-def bulk_insert_vocab(words):
-    """Insere uma lista de palavras únicas no banco de forma eficiente."""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        # Usamos INSERT OR IGNORE para evitar erros de duplicidade
         cursor.executemany("INSERT OR IGNORE INTO vocab (text) VALUES (?)", [(w,) for w in words])
         conn.commit()
 
-def create_index_on_text():
-    """Cria índice na coluna 'text' para acelerar buscas durante o treino."""
+def create_index_on_text() -> None:
+    """Cria índice na coluna 'text' da tabela vocab para acelerar buscas."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vocab_text ON vocab (text)")
@@ -161,12 +162,17 @@ def create_index_on_text():
     print("Índice idx_vocab_text criado/validado.")
 
 # Cache simples em memória para os IDs mais frequentes (Otimização da Sprint 4/27)
-ID_TO_TEXT_CACHE = {}
-TEXT_TO_ID_CACHE = {}
-MAX_CACHE_SIZE = 10000
+ID_TO_TEXT_CACHE: Dict[int, str] = {}
+TEXT_TO_ID_CACHE: Dict[str, int] = {}
+MAX_CACHE_SIZE: int = 10000
 
-def update_vocab_usage(token_id):
-    """Incrementa o contador de uso de um token para otimização de cache."""
+def update_vocab_usage(token_id: int) -> None:
+    """
+    Incrementa o contador de uso de um token para otimização de cache.
+    
+    Args:
+        token_id: ID do token a ser incrementado.
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -176,8 +182,13 @@ def update_vocab_usage(token_id):
         )
         conn.commit()
 
-def build_hot_token_cache(size=5000):
-    """Carrega os tokens mais usados do banco para a RAM."""
+def build_hot_token_cache(size: int = 5000) -> None:
+    """
+    Carrega os tokens mais usados do banco para a RAM (Cache Hot-Tokens).
+    
+    Args:
+        size: Quantidade de tokens frequentes a carregar.
+    """
     global ID_TO_TEXT_CACHE, TEXT_TO_ID_CACHE
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -186,44 +197,55 @@ def build_hot_token_cache(size=5000):
             JOIN vocab_stats s ON v.id = s.id
             ORDER BY s.usage_count DESC LIMIT ?
         ''', (size,))
-        rows = cursor.fetchall()
+        rows: List[Tuple[int, str]] = cursor.fetchall()
         for tid, text in rows:
             ID_TO_TEXT_CACHE[tid] = text
             TEXT_TO_ID_CACHE[text] = tid
     print(f"[CACHE] {len(rows)} Hot-Tokens carregados na RAM.")
 
-def get_text_by_id(token_id):
-    """Retorna o texto original correspondente a um ID no banco."""
-    # 1. Tentar Cache
+def get_text_by_id(token_id: int) -> str:
+    """
+    Retorna o texto original correspondente a um ID, usando cache se possível.
+    
+    Args:
+        token_id: ID do token.
+        
+    Returns:
+        str: Texto do token ou '<UNK>' se não encontrado.
+    """
     if token_id in ID_TO_TEXT_CACHE:
         return ID_TO_TEXT_CACHE[token_id]
         
-    # 2. Consultar Banco
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT text FROM vocab WHERE id = ?", (token_id,))
-        row = cursor.fetchone()
+        row: Optional[Tuple[str]] = cursor.fetchone()
         
     if row:
         text = row[0]
-        # Atualizar Cache se houver espaço
         if len(ID_TO_TEXT_CACHE) < MAX_CACHE_SIZE:
             ID_TO_TEXT_CACHE[token_id] = text
             TEXT_TO_ID_CACHE[text] = token_id
         return text
     return "<UNK>"
 
-def get_or_create_id(text):
-    """Retorna o ID de um token, criando-o se não existir."""
-    # 1. Tentar Cache
+def get_or_create_id(text: str) -> int:
+    """
+    Retorna o ID de um token, buscando no cache ou criando no banco se necessário.
+    
+    Args:
+        text: Texto do token.
+        
+    Returns:
+        int: ID único do token.
+    """
     if text in TEXT_TO_ID_CACHE:
         return TEXT_TO_ID_CACHE[text]
         
-    # 2. Consultar / Inserir Banco
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM vocab WHERE text = ?", (text,))
-        row = cursor.fetchone()
+        row: Optional[Tuple[int]] = cursor.fetchone()
         
         if row:
             token_id = row[0]
@@ -232,15 +254,21 @@ def get_or_create_id(text):
             token_id = cursor.lastrowid
             conn.commit()
     
-    # Atualizar Cache se houver espaço
     if len(ID_TO_TEXT_CACHE) < MAX_CACHE_SIZE:
         ID_TO_TEXT_CACHE[token_id] = text
         TEXT_TO_ID_CACHE[text] = token_id
         
     return token_id
 
-def log_training_metrics(epoch, step, loss):
-    """Grava métricas de treinamento no SQLite."""
+def log_training_metrics(epoch: int, step: int, loss: float) -> None:
+    """
+    Grava métricas de treinamento (Loss por step) no banco de dados.
+    
+    Args:
+        epoch: Época atual.
+        step: Passo global de treino.
+        loss: Valor do erro (Loss).
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -249,8 +277,15 @@ def log_training_metrics(epoch, step, loss):
         )
         conn.commit()
 
-def log_telemetry(metric_name, value, context=None):
-    """Grava métricas de telemetria no SQLite."""
+def log_telemetry(metric_name: str, value: float, context: Optional[str] = None) -> None:
+    """
+    Grava o log de telemetria para análise de performance de I/O e RAM.
+    
+    Args:
+        metric_name: Nome da métrica (ex: 'io_read_latency').
+        value: Valor numérico da métrica.
+        context: Contexto adicional opcional.
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
