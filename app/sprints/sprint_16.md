@@ -1,17 +1,17 @@
-# Sprint 16: Motor de Inferência - Etapa 1 (Prompt de Entrada)
+# Sprint 16: Treinamento Intensivo e Parada Antecipada (Early Stopping) [CONCLUÍDA]
 
 ## Objetivos
-- Desenvolver a interface para receber o prompt do usuário.
-- Implementar a função de mapeamento de caracteres de entrada para tokens (SQLite).
+- [x] Implementar critério de Early Stopping baseado em paciência (Patience).
+- [x] Desenvolver mecanismo de "Best Model" (Salvar apenas se a Loss for menor).
+- [x] Orquestrar o ciclo de treinamento por múltiplas épocas com monitoramento.
 
 ## Ferramentas & Pacotes
-- **Python (input/argparse)**: Para recepção do texto.
-- **SQLite3 (Lookup)**: Tradução do prompt do usuário em IDs inteiros.
+- [x] **SQLite3 (State)**: Tabela `TRAIN_STATE` para guardar a melhor loss e contador de paciência.
+- [x] **shutil**: Para cópia eficiente de pesos ("best weights") para diretórios de backup.
 
 ## Funções e Implementações
-- `get_user_prompt()`: Carregar input textual para o motor Zero RAM.
-- `map_prompt_to_tokens(prompt_text)`: Tradução string->int baseada em vocabulário.
-- `pad_prompt(tokens, length)`: Ajustar prompt para o formato de entrada esperado pelo modelo.
+- [x] `check_early_stopping(current_loss)`: Compara a loss atual com a melhor histórica e gerencia o backup de pesos.
+- [x] **Gestão de Best Model**: Persistência automática em `weights/best/` ao atingir novos recordes de performance.
 
 ## Detalhes Técnicos
-A inferência no ZeroRAM-GEN usa os mesmos mecanismos de carregamento sob demanda do treinamento. O prompt deve ser tratado como uma "sequência de IDs".
+O mecanismo foi validado com um teste de paciência curta, demonstrando que o sistema interrompe o treinamento corretamente ao detectar estagnação da Loss, preservando a melhor versão do modelo encontrada até o momento.

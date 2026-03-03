@@ -12,7 +12,8 @@ from engine import (
 )
 from optimizer import increment_training_step, adam_update_step
 import psutil
-from database_manager import log_telemetry
+from database_manager import log_telemetry, get_db_connection
+import shutil
 
 def train_step(X_batch, Y_batch):
     """Executa um único passo de treinamento (Forward -> Backward -> Update)."""
@@ -104,3 +105,92 @@ def load_training_checkpoint():
         cursor.execute("SELECT value FROM train_state WHERE key = 'last_batch_id'")
         batch = cursor.fetchone()
         return (int(epoch[0]) if epoch else 0, int(batch[0]) if batch else 0)
+
+def check_early_stopping(current_loss, patience=50, min_delta=0.001):
+    """
+    Verifica o critério de Early Stopping e gerencia o 'Best Model'.
+    Retorna True se o treinamento deve ser interrompido.
+    """
+    from tensor_manager import WEIGHTS_DIR
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 1. Obter Melhor Loss anterior
+        cursor.execute("SELECT value FROM train_state WHERE key = 'best_loss'")
+        row = cursor.fetchone()
+        best_loss = float(row[0]) if row else float('inf')
+        
+        # 2. Obter Contador de Paciência
+        cursor.execute("SELECT value FROM train_state WHERE key = 'patience_counter'")
+        row_p = cursor.fetchone()
+        counter = int(row_p[0]) if row_p else 0
+        
+        # 3. Comparar
+        if current_loss < (best_loss - min_delta):
+            # Melhoria detectada
+            print(f" [NEW BEST] Loss melhorou de {best_loss:.6f} para {current_loss:.6f}")
+            best_loss = current_loss
+            counter = 0
+            
+            # Salvar como Melhor Modelo (Copia os arquivos)
+            best_dir = os.path.join(WEIGHTS_DIR, "best")
+            os.makedirs(best_dir, exist_ok=True)
+            for f in os.listdir(WEIGHTS_DIR):
+                if f.endswith(".npy"):
+                    shutil.copy2(os.path.join(WEIGHTS_DIR, f), os.path.join(best_dir, f))
+            shutil.copy2(os.path.join(WEIGHTS_DIR, "weight_registry.json"), os.path.join(best_dir, "weight_registry.json"))
+            print(f" [OK] Pesos persistidos em {best_dir}")
+        else:
+            counter += 1
+            print(f" [ES] Sem melhoria significativa. Paciência: {counter}/{patience}")
+            
+        # 4. Atualizar Estado
+        cursor.execute("INSERT OR REPLACE INTO train_state (key, value) VALUES ('best_loss', ?)", (str(best_loss),))
+        cursor.execute("INSERT OR REPLACE INTO train_state (key, value) VALUES ('patience_counter', ?)", (str(counter),))
+        conn.commit()
+        
+        return counter >= patience
+
+def run_training_session(data_path, batch_size=4, seq_length=8, epochs=1, steps_per_epoch=None):
+    """
+    Orquestra uma sessão completa de treinamento com suporte a múltiplas épocas e early stopping.
+    """
+    from tokenizer import sequence_generator
+    
+    epoch_start, batch_start = load_training_checkpoint()
+    print(f"\n>>> Iniciando Sessão de Treino: Época {epoch_start} a {epoch_start + epochs}")
+    
+    for epoch in range(epoch_start, epoch_start + epochs):
+        print(f"\n--- Época {epoch} ---")
+        gen = sequence_generator(data_path, batch_size, seq_length)
+        
+        current_step = 0
+        epoch_loss = 0
+        
+        for X, Y in gen:
+            current_step += 1
+            
+            # Pular se estivermos retomando de um batch específico
+            if epoch == epoch_start and current_step <= batch_start:
+                continue
+                
+            loss, t = train_step(X, Y)
+            epoch_loss += loss
+            
+            if current_step % 10 == 0:
+                print(f" [Step {current_step}] Loss: {loss:.4f} | Global T: {t}")
+                log_training_metrics(epoch, current_step, loss)
+                save_training_checkpoint(epoch, current_step)
+            
+            # Check Early Stopping
+            if current_step % 50 == 0:
+                if check_early_stopping(loss):
+                    print(f" [STOP] Interrompendo por Early Stopping na Época {epoch}, Step {current_step}")
+                    return
+            
+            if steps_per_epoch and current_step >= steps_per_epoch:
+                break
+        
+        print(f"\nÉpoca {epoch} Concluída. Loss Média Estimada: {epoch_loss/current_step:.4f}")
+        save_training_checkpoint(epoch + 1, 0) # Reinicia batch para próxima época
