@@ -50,26 +50,34 @@ def predict_next_token(token_ids, temperature=1.0, top_k=None):
     
     return next_id
 
-def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None):
+def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_on_punctuation=True):
     """
-    Gera uma sequência de texto a partir de um prompt.
+    Gera uma sequência de texto auto-regressiva com detecção de Stop Tokens.
     """
-    print(f"Gerando texto para: '{prompt}'...")
-    
     # Tokenização do prompt
     tokens = tokenize_line(normalize_text(prompt))
     token_ids = [get_or_create_id(t) for t in tokens]
     
+    # IDs de Stop Tokens comuns
+    stop_words = {'.', '!', '?', '<PAD>'}
+    
     generated_ids = list(token_ids)
     
-    for _ in range(max_new_tokens):
-        # Para modelos simples, podemos precisar limitar o contexto (ex: últimos 8 tokens)
+    for i in range(max_new_tokens):
+        # Janela de contexto deslizante (últimos 8 tokens)
         context_ids = generated_ids[-8:] 
         
         next_id = predict_next_token(context_ids, temperature, top_k)
+        
+        if next_id == 0: # <PAD>
+            break
+            
         generated_ids.append(next_id)
         
-        # Token <PAD> ou STOP? Se o modelo prever o fim da frase.
-        # Aqui geramos até o limite.
+        # Verificar Stop Token
+        if stop_on_punctuation:
+            token_text = get_text_by_id(next_id)
+            if token_text in stop_words:
+                break
         
     return decode_sequence(generated_ids)
