@@ -1,17 +1,16 @@
-# Sprint 21: Orquestração via LangChain - Etapa 1 (Chain Básica)
+# Sprint 21: Orquestração via LangChain - Etapa 1 (Chain Básica) [CONCLUÍDA]
 
 ## Objetivos
-- Integrar o motor de inferência do ZeroRAM-GEN ao ecossistema LangChain.
-- Implementar a Classe `ZeroRAMLLM(BaseLLM)` para compatibilidade de API.
+- [x] Integrar o motor de inferência do ZeroRAM-GEN ao ecossistema LangChain.
+- [x] Implementar a Classe `ZeroRAMLLM(BaseLLM)` para compatibilidade de API.
 
 ## Ferramentas & Pacotes
-- **LangChain (core)**: Biblioteca de orquestração de prompts.
-- **Python (wrappers)**: Criação do wrapper customizado de LLM.
+- [x] **LangChain (core)**: Biblioteca de orquestração de prompts.
+- [x] **Python (wrappers)**: Criação do wrapper customizado de LLM.
 
 ## Funções e Implementações
-- `_call(prompt, stop)`: Implementação obrigatória da LangChain para gerar texto através do ZeroRAM-GEN.
-- `_llm_type()`: Definição da ID do modelo no ecossistema ("zeroram-gen").
-- `init_langchain_wrapper()`: Inicializa a conexão entre LangChain e o motor de disco.
+- [x] `_call(prompt, stop)`: Implementação obrigatória da LangChain.
+- [x] `invoke_chain_test()`: Validação de PromptTemplates e LLMChains.
 
 ## Detalhes Técnicos
-A LangChain permitirá usar ferramentas de memória e encadeamento no futuro, tratando o ZeroRAM-GEN como um LLM padrão.
+A integração foi validada usando `PromptTemplates`. O modelo agora pode ser inserido em fluxos complexos, recebendo inputs estruturados e retornando predições via disco.

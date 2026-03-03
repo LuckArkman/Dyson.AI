@@ -1,17 +1,18 @@
-# Sprint 20: Conclusão do Motor de Inferência (MVP)
+# Sprint 20: Integração com LangChain (LLM Wrapper) [CONCLUÍDA]
 
 ## Objetivos
-- Realizar os primeiros testes reais de conversação com o ZeroRAM-GEN.
-- Medir o tempo de resposta médio por token (ms/token) em disco HDD vs SSD.
+- [x] Criar um Wrapper customizado do LangChain para o ZeroRAM-GEN.
+- [x] Implementar suporte a templates de prompt e encadeamento simples.
+- [x] Validar a compatibilidade com ferramentas de orquestração de LLM.
 
 ## Ferramentas & Pacotes
-- **Python (time)**: Sistema de medição de latência.
-- **SQLite3 (Inference Log)**: Gravar logs de prompts de usuário e respostas geradas.
+- [x] **LangChain**: Framework de orquestração integrado.
+- [x] **inference.py**: Motor de geração subjacente.
 
 ## Funções e Implementações
-- `chat_pilot_test(prompt)`: Integra todos os passos de inferência em um único comando.
-- `calculate_inference_latency()`: Relatório de tempo de carregamento vs. cálculo.
-- `export_inference_v0()`: Congelar o pipeline de inferência estável.
+- [x] `ZeroRAMLLM(LLM)`: Classe herdada do LangChain que encapsula nosso motor.
+- [x] `_call(prompt, stop)`: Implementação obrigatória do método de geração.
+- [x] **Standard Interface**: Suporte ao método `.invoke()` e compatibilidade com cadeias LangChain.
 
 ## Detalhes Técnicos
-Primeiro resultado textual humano do projeto. A frase "Olá, tudo bem?" foi o alvo inicial do vocabulário visto na Sprint 03.
+O ZeroRAM-GEN agora é oficialmente um cidadão do ecossistema LangChain. Isso permite usá-lo em fluxos de RAG (Retrieval Augmented Generation) ou agentes autônomos que rodam inteiramente via disco, sem necessidade de VRAM ou grandes quantidades de RAM.
