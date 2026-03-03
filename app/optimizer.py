@@ -70,4 +70,4 @@ def adam_update_step(layer_name, weights, grad, lr=LEARNING_RATE):
     dispose_tensor(m_hat)
     dispose_tensor(v_hat)
     
-    return new_weights
+    return new_weights.astype(weights.dtype)

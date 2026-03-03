@@ -1,65 +1,54 @@
 import os
 import time
 from database_manager import init_db, get_db_connection
-from tensor_manager import ensure_v0_weights, reset_accumulated_grads
+from tensor_manager import ensure_v0_weights, convert_weights_to_fp16, WEIGHTS_DIR
 from tokenizer import sequence_generator
 from trainer import train_step
 
 def main():
-    print("ZeroRAM-GEN: Iniciando Sprint 14 (Telemetria)")
+    print("ZeroRAM-GEN: Iniciando Sprint 15 (Otimização FP16)")
     
-    # 0. Setup
+    # 0. Setup e Inicialização Normal (FP32)
     init_db()
     ensure_v0_weights()
-    reset_accumulated_grads()
     
-    # Limpar telemetria antiga
+    # 1. Converter para FP16
+    convert_weights_to_fp16()
+    
+    # 2. Validar Tamanhos de Arquivo
+    print("\nValidando tamanhos de arquivos (FP16):")
+    output_w_path = os.path.join(WEIGHTS_DIR, "output_weights.npy")
+    if os.path.exists(output_w_path):
+        # Para um vocabulário de ~251k e hidden de 256, original (FP32) era ~246MB.
+        # FP16 deve ser ~123MB.
+        size_mb = os.path.getsize(output_w_path) / (1024 * 1024)
+        print(f" - output_weights.npy: {size_mb:.2f} MB")
+        
+    # 3. Executar treino para medir nova latência de I/O
+    print("\nColetando nova telemetria (FP16)...")
+    data_path = os.path.join(os.path.dirname(__file__), 'Dayson', 'pt_0.txt')
+    gen = sequence_generator(data_path, batch_size=2, seq_length=5)
+    
+    # Limpar telemetria para o teste
     with get_db_connection() as conn:
         conn.execute("DELETE FROM telemetry")
-        conn.commit()
     
-    # 1. Parâmetros
-    base_dir = os.path.dirname(__file__)
-    data_path = os.path.join(base_dir, 'Dayson', 'pt_0.txt')
-    batch_size = 2
-    seq_length = 5
+    X, Y = next(gen)
+    train_step(X, Y)
     
-    # 2. Executar alguns passos para coletar telemetria
-    print("\nExecutando Ciclo de Treino com Coleta de Telemetria...")
-    gen = sequence_generator(data_path, batch_size, seq_length)
-    
-    for i in range(2):
-        X, Y = next(gen)
-        loss, t = train_step(X, Y)
-        print(f" [Step {i+1}] Loss: {loss:.4f}")
-        
-    # 3. Validar Telemetria no Banco
-    print("\nResumo da Telemetria (SQLite):")
+    # 4. Resultados
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        
-        metrics = [
-            ('io_read_latency', 'Latência Média de Leitura (I/O)', '{:.6f}s'),
-            ('io_write_latency', 'Latência Média de Escrita (I/O)', '{:.6f}s'),
-            ('ram_usage_mb', 'Pico de RAM Detectado', '{:.2f} MB'),
-            ('grad_norm', 'Última Magnitude de Gradiente', '{:.8f}')
-        ]
-        
-        for metric_id, label, fmt in metrics:
-            if metric_id == 'ram_usage_mb':
-                cursor.execute(f"SELECT MAX(value) FROM telemetry WHERE metric_name = '{metric_id}'")
-            elif metric_id == 'grad_norm':
-                cursor.execute(f"SELECT value FROM telemetry WHERE metric_name = '{metric_id}' ORDER BY timestamp DESC LIMIT 1")
-            else:
-                cursor.execute(f"SELECT AVG(value) FROM telemetry WHERE metric_name = '{metric_id}'")
-                
-            val = cursor.fetchone()[0]
-            if val is not None:
-                print(f" - {label}: " + fmt.format(val))
-            else:
-                print(f" - {label}: [Dados não encontrados]")
+        cursor.execute("SELECT AVG(value) FROM telemetry WHERE metric_name = 'io_write_latency'")
+        avg_write = cursor.fetchone()[0]
+        cursor.execute("SELECT MAX(value) FROM telemetry WHERE metric_name = 'ram_usage_mb'")
+        max_ram = cursor.fetchone()[0]
 
-    print("\nSprint 14 Concluída com Sucesso: Telemetria integrada e validada.")
+    print(f"\nResultados da Otimização:")
+    print(f" - Latência Média de Escrita (FP16): {avg_write:.6f}s")
+    print(f" - Pico de RAM: {max_ram:.2f} MB")
+    
+    print("\nSprint 15 Concluída com Sucesso: Modelo otimizado para FP16.")
 
 if __name__ == "__main__":
     main()

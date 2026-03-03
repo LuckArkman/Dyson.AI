@@ -12,18 +12,18 @@ def ensure_weights_dir():
     """Garante que o diretório de pesos existe."""
     os.makedirs(WEIGHTS_DIR, exist_ok=True)
 
-def initialize_layer_weights(shape, name, init_type='xavier'):
-    """Inicializa um tensor de peso e salva no disco."""
+def initialize_layer_weights(shape, name, init_type='xavier', dtype=np.float32):
+    """Inicializa um tensor de peso e salva no disco com o dtype especificado."""
     ensure_weights_dir()
     
     if init_type == 'xavier':
         # Xavier Initialization (Glorot)
         limit = np.sqrt(6 / sum(shape))
-        weights = np.random.uniform(-limit, limit, shape).astype(np.float32)
+        weights = np.random.uniform(-limit, limit, shape).astype(dtype)
     elif init_type == 'zeros':
-        weights = np.zeros(shape, dtype=np.float32)
+        weights = np.zeros(shape, dtype=dtype)
     else:
-        weights = np.random.randn(*shape).astype(np.float32) * 0.01
+        weights = np.random.randn(*shape).astype(dtype) * 0.01
 
     file_path = os.path.join(WEIGHTS_DIR, f"{name}.npy")
     start_time = time.time()
@@ -146,3 +146,35 @@ def ensure_v0_weights():
         
         create_weight_registry(layers_metadata)
         print("[OK] Pesos reinicializados.")
+
+def convert_weights_to_fp16():
+    """Converte todos os pesos do modelo e estados do otimizador para FP16 para economizar I/O."""
+    print("\nIniciando conversão para FP16 (Otimização da Sprint 15)...")
+    if not os.path.exists(REGISTRY_PATH):
+        print("Registro não encontrado.")
+        return
+
+    with open(REGISTRY_PATH, 'r') as f:
+        registry = json.load(f)
+
+    for name, meta in registry['layers'].items():
+        path = meta['path']
+        if os.path.exists(path):
+            tensor = np.load(path)
+            if tensor.dtype != np.float16:
+                print(f" -> Convertendo {name}: {tensor.dtype} -> float16")
+                tensor_fp16 = tensor.astype(np.float16)
+                np.save(path, tensor_fp16)
+                meta['dtype'] = 'float16'
+                
+                # Aproveitar para converter estados do Adam se existirem
+                for suffix in ['_m', '_v']:
+                    optim_path = os.path.join(WEIGHTS_DIR, 'optim', f"{name}{suffix}.npy")
+                    if os.path.exists(optim_path):
+                        o_tensor = np.load(optim_path)
+                        np.save(optim_path, o_tensor.astype(np.float16))
+            dispose_tensor(tensor)
+    
+    with open(REGISTRY_PATH, 'w') as f:
+        json.dump(registry, f, indent=4)
+    print("[OK] Conversão para FP16 concluída.")

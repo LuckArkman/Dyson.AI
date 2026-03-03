@@ -70,24 +70,20 @@ def dense_layer_forward(input_tensor, weights_name, bias_name=None, activation='
     return output
 
 def compute_softmax(logits):
-    """Transforma logits (pesos brutos) em probabilidades (0 a 1)."""
-    # Subtrair o máximo para estabilidade numérica (evita overflow)
-    exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
-    return exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+    """Transforma logits em probabilidades com estabilidade para FP16."""
+    # Subtrair o máximo para evitar overflow no exp
+    logits_max = np.max(logits, axis=-1, keepdims=True)
+    exp_logits = np.exp(logits - logits_max)
+    probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+    # Clip para evitar zeros absolutos que quebram o log na Loss
+    return np.clip(probs, 1e-7, 1.0)
 
 def calculate_loss(probabilities, target_ids):
-    """
-    Calcula Cross Entropy Loss.
-    probabilities: Shape (seq_len, vocab_size)
-    target_ids: Lista de IDs reais que deveriam ocorrer.
-    """
-    # correct_log_probs = -np.log(probabilities[range(batch_size), target_ids] + 1e-10)
-    # return np.mean(correct_log_probs)
-    # Melhorado para evitar indexação direta em matrizes gigantes se necessário
-    # mas por enquanto mantemos a lógica da Sprint 08
+    """Calcula Cross Entropy Loss com proteção contra log(0)."""
     batch_size = len(target_ids)
     selected_probs = probabilities[range(batch_size), target_ids]
-    return -np.mean(np.log(selected_probs + 1e-10))
+    # Garantir que não temos zero no log
+    return -np.mean(np.log(selected_probs + 1e-7))
 
 def compute_output_gradient(probabilities, target_ids):
     """
