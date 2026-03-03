@@ -62,8 +62,15 @@ def init_db():
                 message TEXT
             )
         ''')
-        # Inserir token <PAD> se não existir
+        # Inserir tokens especiais se não existirem
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
+        special_tokens = [
+            (1, '<|system|>'),
+            (2, '<|user|>'),
+            (3, '<|assistant|>'),
+            (4, '<|endoftext|>')
+        ]
+        cursor.executemany("INSERT OR IGNORE INTO vocab (id, text) VALUES (?, ?)", special_tokens)
         conn.commit()
     print(f"Banco de Dados Inicializado em: {DB_PATH}")
 

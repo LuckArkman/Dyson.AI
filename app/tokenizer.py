@@ -15,10 +15,14 @@ def normalize_text(text):
     """Limpa e normaliza o texto (lowercase e remoção de caracteres especiais)."""
     # Converter para minúsculas
     text = text.lower()
-    # Remover caracteres especiais mantendo pontuação básica
-    text = re.sub(r"[^a-zA-Z0-9áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ\s\.\!\?\-\,]", "", text)
-    # Adicionar espaços ao redor da pontuação para correta tokenização
-    text = re.sub(r"([\.\!\?\-\,])", r" \1 ", text)
+    # Remover caracteres especiais mantendo pontuação básica e tags de sistema <|...|>
+    text = re.sub(r"[^a-zA-Z0-9áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ\s\.\!\?\-\,\<\| \>]", "", text)
+    # Proteger as tags especiais (endoftext, etc) para não serem separadas por espaços
+    # text = re.sub(r"([\.\!\?\-\,])", r" \1 ", text) # Antigo
+    # Nova lógica: Adicionar espaços ao redor da pontuação, mas ignorar o que estiver dentro de <| |>
+    text = re.sub(r"(?<![\|<])([\.\!\?\-\,])(?![\|>])", r" \1 ", text)
+    # Adicionar espaços ao redor das tags de sistema para garantir que sejam tokens únicos
+    text = re.sub(r"(<\|.*?\|>)", r" \1 ", text)
     # Remover espaços extras
     text = re.sub(r"\s+", " ", text).strip()
     return text

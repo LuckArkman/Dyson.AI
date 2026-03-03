@@ -1,17 +1,17 @@
-# Sprint 23: Modulação Comportamental - Etapa 1 (Prefix Tokens)
+# Sprint 23: Modulação Comportamental - Etapa 1 (Prefix Tokens) [CONCLUÍDA]
 
 ## Objetivos
-- Implementar o sistema de Prefixos Comportamentais ("Persona").
-- Desenvolver tokens especiais (e.g. `<|system|>`, `<|user|>`, `<|assistant|>`).
+- [x] Implementar o sistema de Prefixos Comportamentais ("Persona").
+- [x] Desenvolver tokens especiais (e.g. `<|system|>`, `<|user|>`, `<|assistant|>`).
 
 ## Ferramentas & Pacotes
-- **SQLite3 (Persona)**: Tabela `PROMPT_TEMPLATES`.
-- **Special Indexing (SQL)**: IDs reservados para tokens de sistema.
+- [x] **SQLite3 (Persona)**: Tabela `vocab` atualizada com marcadores especiais.
+- [x] **Regex Utility**: `tokenizer.py` modificado para suportar preservação de tags.
 
 ## Funções e Implementações
-- `inject_system_prefix(persona_name)`: Carrega o prompt de persona como os primeiros tokens da sequência.
-- `map_special_tokens(text)`: Traduz tags `<|tag|>` em IDs específicos do vocabulário.
-- `apply_chat_format(history)`: Formatar o diálogo para o estilo LLM Chat (User/Assistant).
+- [x] `apply_chat_format(messages)`: Converte mensagens do LangChain para o formato de tokens do modelo.
+- [x] `map_special_tokens(text)`: Mapeia sequências com tags para IDs de tokens correspondentes.
+- [x] **Ajuste de Normalização**: Garantia de que tags como `<|system|>` sejam tratadas como átomos únicos.
 
 ## Detalhes Técnicos
-A persona muda drasticamente o comportamento do modelo, mesmo com poucos parâmetros. O vocabulário deve aceitar esses marcadores.
+A modulação comportamental agora permite que o modelo entenda quem está falando (Usuário, Sistema ou Assistente). Isso é fundamental para manter a coerência em diálogos e seguir instruções de persona.
