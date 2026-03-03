@@ -1,17 +1,17 @@
-# Sprint 43: Interface de Usuário Final (Terminal CLI e Web)
+# Sprint 43: Interface de Usuário Final (Terminal CLI e Web) [CONCLUÍDA]
 
 ## Objetivos
-- Implementar a CLI (Interface de Linha de Comando) interativa.
-- Desenvolver um DashBoard Web simples para telemetria I/O.
+- [x] Implementar a CLI (Interface de Linha de Comando) interativa.
+- [x] Desenvolver um DashBoard Web simples para telemetria I/O.
 
 ## Ferramentas & Pacotes
-- **Python (Click / Typer)**: Para a interface CLI.
-- **Python (Flask / FastAPI)**: Para o dashboard de telemetria.
+- [x] **Python (argparse)**: Base para a interface CLI robusta.
+- [x] **Python (Flask)**: Servidor leve para o dashboard de telemetria em tempo real.
 
 ## Funções e Implementações
-- `zeroram_cli(...)`: Interface de comando Principal do projeto.
-- `start_telemetry_ui()`: Lançar servidor HTTP com visualização de métricas de disco.
-- `connect_cli_to_swarm()`: Modo CLI para nó do Swarm.
+- [x] `cli_manager.py`: Ponto de entrada para comandos `status`, `net` e `stats`.
+- [x] `dashboard.py`: Interface Web (HTML/CSS) que consome o banco de dados de telemetria.
+- [x] `start_telemetry_ui()`: Implementado via Flask para monitorar latência de disco e nós do Swarm.
 
 ## Detalhes Técnicos
-Transforme o motor de disco em um produto interativo. O dashboard deve mostrar o "Gargalo de I/O" em gráficos.
+O ZeroRAM-GEN agora possui uma cara profissional. A CLI permite o controle total do motor e da rede, enquanto o Dashboard Web oferece uma visão clara das latências de I/O, permitindo identificar gargalos físicos de disco em tempo real. Esta interface é essencial para a gestão do "Dyson Swarm".
