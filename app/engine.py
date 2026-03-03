@@ -167,6 +167,36 @@ def compute_loss(probs: np.ndarray, target_ids: np.ndarray) -> float:
     loss: float = -np.mean(np.log(target_probs))
     return loss
 
+def calculate_loss(probs: np.ndarray, target_ids: np.ndarray) -> float:
+    """Sinônimo para compatibilidade com trainer.py."""
+    return compute_loss(probs, target_ids)
+
+def compute_output_gradient(probs: np.ndarray, target_ids: np.ndarray) -> np.ndarray:
+    """Calcula o gradiente inicial (dout) na camada de saída para Cross Entropy."""
+    batch_size = probs.shape[0]
+    dout = probs.copy()
+    # Para Cross-Entropy com Softmax, o gradiente é (probs - targets)
+    dout[np.arange(batch_size), target_ids] -= 1
+    return dout / batch_size
+
+def backward_layer_step(dout: np.ndarray, weights_name: str, input_tensor: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Versão compatível para o trainer.py que retorna todos os gradientes de uma vez.
+    """
+    from tensor_manager import load_tensor_mmap, dispose_tensor
+    weights = load_tensor_mmap(weights_name)
+    
+    dw = np.dot(input_tensor.T, dout)
+    db = np.sum(dout, axis=0)
+    din = np.dot(dout, weights.T)
+    
+    dispose_tensor(weights)
+    return dw, db, din
+
+def d_relu(x: np.ndarray) -> np.ndarray:
+    """Derivada da função ReLU."""
+    return (x > 0).astype(x.dtype)
+
 def dense_layer_backward(dout: np.ndarray, input_tensor: np.ndarray, weights_name: str) -> np.ndarray:
     """
     Backpropagation para uma camada densa (Zero RAM).
@@ -208,3 +238,24 @@ def dense_layer_backward(dout: np.ndarray, input_tensor: np.ndarray, weights_nam
     dispose_tensor(weights)
     
     return din
+
+def accumulate_embedding_grad(grad_emb: np.ndarray, token_ids: np.ndarray, weights_name: str = "embedding_matrix"):
+    """
+    Acumula gradientes para a matriz de embeddings preservando a estrutura Zero RAM.
+    """
+    from tensor_manager import store_tensor_disk, get_layer_metadata, WEIGHTS_DIR
+    
+    grad_path = os.path.join(WEIGHTS_DIR, 'grads', f"{weights_name}_dw.npy")
+    
+    if os.path.exists(grad_path):
+        existing_grad = np.load(grad_path).astype(np.float32)
+    else:
+        meta = get_layer_metadata(weights_name)
+        existing_grad = np.zeros(meta['shape'], dtype=np.float32)
+    
+    # Acumular gradientes apenas para os IDs que estiveram no batch
+    # grad_emb: (batch, dim), token_ids: (batch,)
+    for i, tid in enumerate(token_ids):
+        existing_grad[tid] += grad_emb[i]
+        
+    store_tensor_disk(f"{weights_name}_dw", existing_grad, folder='grads')

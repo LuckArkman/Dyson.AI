@@ -54,6 +54,9 @@ def train_step(X_batch, Y_batch):
         grad_h1_z, "hidden_01_weights", emb[:, -1, :]
     )
     
+    # Acumular gradiente de embeddings (especial para Zero RAM)
+    accumulate_embedding_grad(grad_emb, X_batch[:, -1])
+    
     # --- UPDATE (ADAM) ---
     t = increment_training_step()
     
