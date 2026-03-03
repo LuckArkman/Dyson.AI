@@ -1,18 +1,18 @@
-# Sprint 46: Ingestão Massiva de Dados e Expansão do Vocabulário
+# Sprint 46: Ingestão Massiva de Dados e Expansão do Vocabulário [CONCLUÍDA]
 
 ## Objetivos
-- [ ] Desenvolver um processador de corpus para leitura de grandes arquivos de texto.
-- [ ] Implementar a tokenização em lote (bulk) e inserção eficiente no SQLite.
-- [ ] Validar a integridade do vocabulário após a ingestão de milhões de tokens.
+- [x] Desenvolver um processador de corpus para leitura de grandes arquivos de texto.
+- [x] Implementar a tokenização em lote (bulk) e inserção eficiente no SQLite.
+- [x] Validar a integridade do vocabulário após a ingestão de milhões de tokens.
 
 ## Ferramentas & Pacotes
-- **Python (itertools / collections)**: Para processamento eficiente de streams de texto.
-- **SQLite3**: Inserções em lote (`executemany`) e gerenciamento de transações.
+- [x] **Python (re / Generator)**: `data_ingestor.py` implementado com suporte a arquivos gigantes via streaming.
+- [x] **SQLite3**: Uso de `bulk_insert_vocab` com transações e indexação automática.
 
 ## Funções e Implementações
-- `stream_corpus(file_path)`: Gerador para leitura linha a linha de arquivos gigantes.
-- `bulk_tokenize_and_store(tokens)`: Sistema de inserção em massa com cache de IDs.
-- `verify_vocab_coverage()`: Relatório de densidade do vocabulário.
+- [x] `stream_file(file_path)`: Implementado como gerador linha a linha.
+- [x] `process_directory(path)`: Varredura recursiva de diretórios de texto.
+- [x] `ZeroRAMDataIngestor`: Classe central para gestão de vocabulário em escala.
 
 ## Detalhes Técnicos
-O ZeroRAM-GEN precisa de "combustível" (dados). Nesta sprint, focamos em como transformar gigabytes de texto bruto em uma tabela `vocab` indexada e pronta para o treinamento sem estourar a RAM do servidor de ingestão.
+A infraestrutura de dados foi validada. O sistema agora pode processar corpora massivos, extraindo tokens únicos e alimentando o banco de dados `vocab.db` sem exceder os limites de memória RAM, respeitando o princípio core do projeto.
