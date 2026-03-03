@@ -2,6 +2,7 @@ import numpy as np
 import os
 import json
 import time
+import lz4.frame
 from database_manager import log_telemetry
 
 # Diretório base para os pesos do modelo
@@ -286,6 +287,49 @@ def get_svd_params(name):
         with open(meta_path, 'r') as f:
             return json.load(f)
     return None
+
+def save_compressed_tensor(name, tensor):
+    """Salva um tensor comprimido com LZ4 para poupar largura de banda de disco."""
+    # Converter para bytes de forma eficiente
+    tensor_bytes = tensor.tobytes()
+    compressed_data = lz4.frame.compress(tensor_bytes)
+    
+    path = os.path.join(WEIGHTS_DIR, f"{name}.lz4")
+    with open(path, 'wb') as f:
+        f.write(compressed_data)
+    
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.lz4_meta")
+    with open(meta_path, 'w') as f:
+        json.dump({
+            "compressed": True, 
+            "original_shape": list(tensor.shape), 
+            "dtype": str(tensor.dtype)
+        }, f)
+        
+    print(f"[LZ4] '{name}' comprimido: {len(tensor_bytes)//1024}KB -> {len(compressed_data)//1024}KB")
+
+def load_compressed_tensor(name):
+    """Carrega e descompacta um tensor LZ4 inteiramente para a RAM."""
+    path = os.path.join(WEIGHTS_DIR, f"{name}.lz4")
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.lz4_meta")
+    
+    if not os.path.exists(path) or not os.path.exists(meta_path):
+        return None
+        
+    with open(meta_path, 'r') as f:
+        meta = json.load(f)
+        
+    start_time = time.time()
+    with open(path, 'rb') as f:
+        compressed_data = f.read()
+    
+    decompressed_data = lz4.frame.decompress(compressed_data)
+    tensor = np.frombuffer(decompressed_data, dtype=meta['dtype']).reshape(meta['original_shape']).copy()
+    
+    latency = time.time() - start_time
+    log_telemetry('io_read_latency', latency, f"lz4_load:{name}")
+    
+    return tensor
 
 # Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
 DEFAULT_DTYPE = np.float16 

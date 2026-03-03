@@ -1,6 +1,7 @@
 from tensor_manager import (
     load_tensor_mmap, dispose_tensor, get_quant_params, 
-    dequantize_from_int8, get_svd_params, WEIGHTS_DIR
+    dequantize_from_int8, get_svd_params, WEIGHTS_DIR,
+    load_compressed_tensor
 )
 import numpy as np
 import os
@@ -77,7 +78,17 @@ def dense_layer_forward(input_tensor, weights_name, bias_name=None, activation='
     """
     # 0. Checar se existe SVD para esta camada (Prioridade de I/O)
     svd_meta = get_svd_params(weights_name)
-    if svd_meta and svd_meta.get('svd'):
+    
+    # Checar se existe compressão LZ4
+    lz4_meta_path = os.path.join(WEIGHTS_DIR, f"{weights_name}.lz4_meta")
+    is_lz4 = os.path.exists(lz4_meta_path)
+
+    if is_lz4:
+        # Prioridade para descompressão LZ4 (CPU é rápida, Disco é lento)
+        weights = load_compressed_tensor(weights_name)
+        output = np.dot(input_tensor, weights)
+        dispose_tensor(weights)
+    elif svd_meta and svd_meta.get('svd'):
         # Forward via Low-Rank: x * (U * S * V) -> (x * U) * (S * V) ou similar
         # Aqui fazemos: (input * U) * (diag(S) * V)
         u = np.load(os.path.join(WEIGHTS_DIR, f"{weights_name}_svd", "u.npy"), mmap_mode='r')
