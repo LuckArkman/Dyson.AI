@@ -95,6 +95,16 @@ def init_db():
                 FOREIGN KEY(id) REFERENCES vocab(id)
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS shard_map (
+                tensor_name TEXT,
+                shard_id INTEGER,
+                start_index INTEGER,
+                end_index INTEGER,
+                file_path TEXT,
+                PRIMARY KEY (tensor_name, shard_id)
+            )
+        ''')
         # Inserir tokens especiais se não existirem
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         special_tokens = [

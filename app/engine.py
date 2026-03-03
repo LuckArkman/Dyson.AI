@@ -1,7 +1,7 @@
 from tensor_manager import (
     load_tensor_mmap, dispose_tensor, get_quant_params, 
     dequantize_from_int8, get_svd_params, WEIGHTS_DIR,
-    load_compressed_tensor
+    load_compressed_tensor, lookup_shard_for_id
 )
 import numpy as np
 import os
@@ -36,21 +36,32 @@ def apply_activation(tensor, act_type='relu'):
 def embedding_lookup(token_ids):
     """
     Busca os vetores de embedding para uma lista de IDs.
-    Mantém o princípio Zero RAM ao carregar apenas o que for fatiado.
+    Suporta Sharding (Segmentação) se a matriz estiver fragmentada.
     """
-    # Carregar matriz de embeddings em modo mmap (Zero RAM residente)
-    embed_matrix = load_tensor_mmap("embedding_matrix")
+    # 1. Tentar buscar primeiro via Sharding
+    # Para simplificar, verificamos o primeiro ID. Se tiver shard, assumimos modo segmentado.
+    first_shard_info = lookup_shard_for_id("embedding_matrix", token_ids[0])
     
-    # Slicing múltiplo retorna uma cópia em RAM apenas dos vetores solicitados
-    vectors = embed_matrix[token_ids]
+    if first_shard_info:
+        # Modo Segmentado (Sharded)
+        all_vectors = []
+        # Nota: Em produção, agruparíamos por shard_path para otimizar I/O
+        for tid in token_ids:
+            shard_path, internal_idx = lookup_shard_for_id("embedding_matrix", tid)
+            shard_data = np.load(shard_path, mmap_mode='r')
+            all_vectors.append(shard_data[internal_idx].copy())
+            dispose_tensor(shard_data)
+        vectors = np.array(all_vectors)
+    else:
+        # Modo Tradicional (Arquivo Único via MMap)
+        embed_matrix = load_tensor_mmap("embedding_matrix")
+        vectors = embed_matrix[token_ids]
+        dispose_tensor(embed_matrix)
     
     # 3. Dequantizar se necessário (Sprint 31)
     q_params = get_quant_params("embedding_matrix")
     if q_params and q_params.get('quantized'):
         vectors = dequantize_from_int8(vectors, q_params['scale'], q_params['zero_point'])
-    
-    # Liberar o mapeamento da matriz gigante imediatamente
-    dispose_tensor(embed_matrix)
     
     return vectors
 

@@ -331,6 +331,54 @@ def load_compressed_tensor(name):
     
     return tensor
 
+def create_tensor_shards(name, tensor, ids_per_shard=1000):
+    """Divide um tensor gigante em fragmentos (shards) no disco."""
+    from database_manager import get_db_connection
+    num_elements = tensor.shape[0]
+    num_shards = (num_elements + ids_per_shard - 1) // ids_per_shard
+    
+    shard_dir = os.path.join(WEIGHTS_DIR, f"{name}_shards")
+    os.makedirs(shard_dir, exist_ok=True)
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Limpar shards antigos se existirem no registro
+        cursor.execute("DELETE FROM shard_map WHERE tensor_name = ?", (name,))
+        
+        for i in range(num_shards):
+            start_idx = i * ids_per_shard
+            end_idx = min((i + 1) * ids_per_shard, num_elements)
+            
+            shard_data = tensor[start_idx:end_idx]
+            shard_filename = f"shard_{i}.npy"
+            shard_path = os.path.join(shard_dir, shard_filename)
+            np.save(shard_path, shard_data)
+            
+            cursor.execute(
+                "INSERT INTO shard_map (tensor_name, shard_id, start_index, end_index, file_path) VALUES (?, ?, ?, ?, ?)",
+                (name, i, start_idx, end_idx, shard_path)
+            )
+        conn.commit()
+    
+    print(f"[SHARD] Tensor '{name}' dividido em {num_shards} fragmentos de ~{ids_per_shard} elementos.")
+
+def lookup_shard_for_id(tensor_name, original_id):
+    """Localiza o shard e o offset interno para um determinado ID global."""
+    from database_manager import get_db_connection
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT shard_id, start_index, file_path FROM shard_map WHERE tensor_name = ? AND ? >= start_index AND ? < end_index",
+            (tensor_name, original_id, original_id)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+            
+        shard_id, start_index, file_path = row
+        internal_offset = original_id - start_index
+        return file_path, internal_offset
+
 # Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
 DEFAULT_DTYPE = np.float16 
 USE_INT8 = True # Habilitar quantização experimental

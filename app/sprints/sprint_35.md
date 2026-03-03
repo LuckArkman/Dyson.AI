@@ -1,17 +1,17 @@
-# Sprint 35: Segmentação de Tensores (Sharding) no Disco
+# Sprint 35: Segmentação de Tensores (Sharding) no Disco [CONCLUÍDA]
 
 ## Objetivos
-- Dividir tensores gigantes (como os Embeddings) em arquivos de fragmentos (Shards).
-- Reduzir o custo de I/O de busca de ID único no disco.
+- [x] Dividir tensores gigantes (como os Embeddings) em arquivos de fragmentos (Shards).
+- [x] Reduzir o custo de I/O de busca de ID único no disco.
 
 ## Ferramentas & Pacotes
-- **Python (os, shutil)**: Gerenciamento de diretórios de shards.
-- **SQLite3 (Metadata)**: Tabela `SHARD_MAP`.
+- [x] **Python (os, shutil)**: Gerenciamento de diretórios de shards.
+- [x] **SQLite3 (Metadata)**: Tabela `shard_map` para rastrear intervalos de cada fragmento.
 
 ## Funções e Implementações
-- `create_embedding_shards(total_ids, ids_per_shard)`: Dividir a matriz de embedding.
-- `lookup_shard_by_id(token_id)`: Localizar em qual fragmento de arquivo está o vetor desejado.
-- `load_specific_shard(shard_id)`: Carregar apenas o fragmento necessário em vez do arquivo total.
+- [x] `create_tensor_shards(name, tensor, ids_per_shard)`: Divisão física automática de tensores.
+- [x] `lookup_shard_for_id(tensor_name, original_id)`: Localização dinâmica de fragmentos via Banco de Dados.
+- [x] **Multi-Shard Inference**: `embedding_lookup` atualizado para montar vetores a partir de múltiplos shards de forma transparente.
 
 ## Detalhes Técnicos
-O ZeroRAM-GEN ganha em granularidade, evitando o carregamento de "lixo" do disco ao buscar um token simples.
+O ZeroRAM-GEN agora possui uma granularidade muito maior. Em vez de operar sobre um único arquivo de 64MB+ (que pode ser problemático em sistemas com pouca cache de disco/RAM), o motor pode ler apenas pequenos fragmentos de 5000 tokens por vez. Isso é a base para a **Escalabilidade em Swarm** (Sprint 36), onde cada nó pode segurar apenas alguns shards.
