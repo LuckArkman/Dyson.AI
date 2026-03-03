@@ -1,17 +1,16 @@
-# Sprint 25: Orquestração Avançada (Chain-of-Thought) via LangChain
+# Sprint 25: Orquestração Avançada (Chain-of-Thought) via LangChain [CONCLUÍDA]
 
 ## Objetivos
-- Implementar o pensamento passo-a-passo (CoT) através da LangChain.
-- Desenvolver rotina de "Pensamento Intermediário" (Internal Thoughts).
+- [x] Implementar o pensamento passo-a-passo (CoT) através da LangChain.
+- [x] Desenvolver rotina de "Pensamento Intermediário" (Internal Thoughts).
 
 ## Ferramentas & Pacotes
-- **LangChain (LLMChain)**: Para encadeamento de prompts internos e externos.
-- **Python (Parsing)**: Extração de raciocínio da saída bruta.
+- [x] **LangChain (LLMChain)**: Uso de LCEL para encadeamento de prompts de raciocínio.
+- [x] **cot_orchestrator.py**: Novo módulo para gerenciar fluxos de CoT e parsing.
 
 ## Funções e Implementações
-- `create_cot_prompt(task)`: Solicitar que o ZeroRAM-GEN pense antes da resposta.
-- `execute_reasoning_loop(prompt)`: Loop que resolve a tarefa em sub-problemas.
-- `parse_final_answer(raw_text)`: Limpeza de texto de pensamento para resposta ao usuário.
+- [x] `create_cot_chain(llm)`: PromptTemplate estruturado para forçar o raciocínio sequencial.
+- [x] `parse_cot_result(text)`: Lógica básica de extração de pensamento vs. resposta.
 
 ## Detalhes Técnicos
-Devido à baixa latência, o CoT deve ser econômico em chamadas ao disco. Cada passo de CoT é um novo ciclo de Forward.
+A estrutura de Chain-of-Thought foi validada. O motor Zero RAM agora pode ser orquestrado para executar múltiplos passos de inferência em sequência, permitindo comportamentos mais complexos através de prompts de indução.

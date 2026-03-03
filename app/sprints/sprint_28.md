@@ -1,17 +1,17 @@
-# Sprint 28: Persistência Total de Sessão de Usuário
+# Sprint 28: Persistência Total de Sessão de Usuário [CONCLUÍDA]
 
 ## Objetivos
-- Salvar o estado completo da conversação em disco (SQLite) para retomar mais tarde.
-- Implementar o ID de Sessão Único (Session_ID).
+- [x] Salvar o estado completo da conversação em disco (SQLite) para retomar mais tarde.
+- [x] Implementar o ID de Sessão Único (Session_ID).
 
 ## Ferramentas & Pacotes
-- **SQLite3 (Sessions)**: Tabela `SESSION_STATE`.
-- **JSON (serialization)**: Para dump de estados de memória contextual (LangChain).
+- [x] **SQLite3 (Sessions)**: Tabela `session_state` para metadados de sessão.
+- [x] **session_manager.py**: Módulo de orquestração de estados de usuário.
 
 ## Funções e Implementações
-- `save_session_state(session_id, history)`: Gravar histórico, persona e configurações no SQL.
-- `load_session_state(session_id)`: Recuperar a conversa anterior para o modelo.
-- `list_recent_sessions()`: Menu de sessões para escolha do usuário.
+- [x] `save_session_state(id, ...)`: Registra persona, viés e temperatura da sessão.
+- [x] `load_session_state(id)`: Recupera as configurações para restaurar o comportamento do modelo.
+- [x] `list_recent_sessions()`: Utilitário para auditoria e interface de usuário.
 
 ## Detalhes Técnicos
-Isso garante a continuidade e persistência contínua (Seção 1 do White Paper).
+A persistência de sessão garante que o usuário possa trocar de dispositivos ou reiniciar a aplicação sem perder a "personalidade" ou as configurações de inferência da conversa atual. Juntamente com a memória de mensagens (Sprint 22), isso completa o ciclo de persistência contínua do White Paper.

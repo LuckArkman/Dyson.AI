@@ -1,7 +1,8 @@
 from typing import Any, List, Optional
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
-from inference import generate_text
+from langchain_core.outputs import GenerationChunk
+from inference import generate_text, stream_generate_text
 
 class ZeroRAMLLM(LLM):
     """
@@ -42,6 +43,28 @@ class ZeroRAMLLM(LLM):
             response = response[len(prompt):].strip()
             
         return response
+
+    def _stream(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ):
+        """
+        Gera tokens em streaming para o LangChain.
+        """
+        for token in stream_generate_text(
+            prompt,
+            max_new_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            top_k=self.top_k,
+            stop_on_punctuation=True
+        ):
+            chunk = GenerationChunk(text=token + " ")
+            if run_manager:
+                run_manager.on_llm_new_token(token + " ")
+            yield chunk
 
     @property
     def _identifying_params(self) -> dict:

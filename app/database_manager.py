@@ -69,6 +69,32 @@ def init_db():
                 vector_path TEXT
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS session_state (
+                session_id TEXT PRIMARY KEY,
+                persona_name TEXT,
+                bias_name TEXT,
+                temperature REAL,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gold_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                prompt TEXT,
+                completion TEXT,
+                source TEXT,
+                similarity_score REAL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vocab_stats (
+                id INTEGER PRIMARY KEY,
+                usage_count INTEGER DEFAULT 0,
+                FOREIGN KEY(id) REFERENCES vocab(id)
+            )
+        ''')
         # Inserir tokens especiais se não existirem
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         special_tokens = [
@@ -110,26 +136,84 @@ def create_index_on_text():
         conn.commit()
     print("Índice idx_vocab_text criado/validado.")
 
-# Cache simples em memória para os IDs mais frequentes (Otimização da Sprint 4)
+# Cache simples em memória para os IDs mais frequentes (Otimização da Sprint 4/27)
 ID_TO_TEXT_CACHE = {}
-MAX_CACHE_SIZE = 5000
+TEXT_TO_ID_CACHE = {}
+MAX_CACHE_SIZE = 10000
+
+def update_vocab_usage(token_id):
+    """Incrementa o contador de uso de um token para otimização de cache."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO vocab_stats (id, usage_count) VALUES (?, 1) "
+            "ON CONFLICT(id) DO UPDATE SET usage_count = usage_count + 1",
+            (token_id,)
+        )
+        conn.commit()
+
+def build_hot_token_cache(size=5000):
+    """Carrega os tokens mais usados do banco para a RAM."""
+    global ID_TO_TEXT_CACHE, TEXT_TO_ID_CACHE
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT v.id, v.text FROM vocab v
+            JOIN vocab_stats s ON v.id = s.id
+            ORDER BY s.usage_count DESC LIMIT ?
+        ''', (size,))
+        rows = cursor.fetchall()
+        for tid, text in rows:
+            ID_TO_TEXT_CACHE[tid] = text
+            TEXT_TO_ID_CACHE[text] = tid
+    print(f"[CACHE] {len(rows)} Hot-Tokens carregados na RAM.")
 
 def get_text_by_id(token_id):
     """Retorna o texto original correspondente a um ID no banco."""
+    # 1. Tentar Cache
     if token_id in ID_TO_TEXT_CACHE:
         return ID_TO_TEXT_CACHE[token_id]
-    
+        
+    # 2. Consultar Banco
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT text FROM vocab WHERE id = ?", (token_id,))
         row = cursor.fetchone()
+        
+    if row:
+        text = row[0]
+        # Atualizar Cache se houver espaço
+        if len(ID_TO_TEXT_CACHE) < MAX_CACHE_SIZE:
+            ID_TO_TEXT_CACHE[token_id] = text
+            TEXT_TO_ID_CACHE[text] = token_id
+        return text
+    return "<UNK>"
+
+def get_or_create_id(text):
+    """Retorna o ID de um token, criando-o se não existir."""
+    # 1. Tentar Cache
+    if text in TEXT_TO_ID_CACHE:
+        return TEXT_TO_ID_CACHE[text]
+        
+    # 2. Consultar / Inserir Banco
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM vocab WHERE text = ?", (text,))
+        row = cursor.fetchone()
+        
         if row:
-            text = row[0]
-            # Gerenciamento simples de cache
-            if len(ID_TO_TEXT_CACHE) < MAX_CACHE_SIZE:
-                ID_TO_TEXT_CACHE[token_id] = text
-            return text
-        return "<UNK>" # Token desconhecido
+            token_id = row[0]
+        else:
+            cursor.execute("INSERT INTO vocab (text) VALUES (?)", (text,))
+            token_id = cursor.lastrowid
+            conn.commit()
+    
+    # Atualizar Cache se houver espaço
+    if len(ID_TO_TEXT_CACHE) < MAX_CACHE_SIZE:
+        ID_TO_TEXT_CACHE[token_id] = text
+        TEXT_TO_ID_CACHE[text] = token_id
+        
+    return token_id
 
 def log_training_metrics(epoch, step, loss):
     """Grava métricas de treinamento no SQLite."""

@@ -85,3 +85,29 @@ def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_o
                 break
         
     return decode_sequence(generated_ids)
+
+def stream_generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_on_punctuation=True, bias_name=None):
+    """
+    Gerador que retorna tokens um a um em tempo real (Streaming).
+    """
+    # Tokenização do prompt
+    tokens = tokenize_line(normalize_text(prompt))
+    token_ids = [get_or_create_id(t) for t in tokens]
+    
+    stop_words = {'.', '!', '?', '<PAD>'}
+    generated_ids = list(token_ids)
+    
+    for i in range(max_new_tokens):
+        context_ids = generated_ids[-8:] 
+        
+        next_id = predict_next_token(context_ids, temperature, top_k, bias_name=bias_name)
+        
+        if next_id == 0: break
+            
+        generated_ids.append(next_id)
+        token_text = get_text_by_id(next_id)
+        
+        yield token_text
+        
+        if stop_on_punctuation and token_text in stop_words:
+            break
