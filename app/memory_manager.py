@@ -30,13 +30,20 @@ class ZeroRAMMessageHistory(BaseChatMessageHistory):
         return messages
 
     def add_message(self, message: BaseMessage) -> None:
-        """Adiciona uma nova mensagem ao SQLite."""
+        """Adiciona uma nova mensagem ao SQLite e aplica FIFO se necessário."""
         role = 'human' if isinstance(message, HumanMessage) else 'ai'
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO conv_history (session_id, role, message) VALUES (?, ?, ?)",
                 (self.session_id, role, message.content)
+            )
+            
+            # FIFO: Manter apenas os últimos 10 turnos (Sprint 22 Requirement)
+            cursor.execute(
+                "DELETE FROM conv_history WHERE session_id = ? AND id NOT IN ("
+                "SELECT id FROM conv_history WHERE session_id = ? ORDER BY timestamp DESC LIMIT 20)",
+                (self.session_id, self.session_id)
             )
             conn.commit()
 
