@@ -2,7 +2,7 @@ import numpy as np
 from database_manager import get_or_create_id, get_text_by_id
 from engine import embedding_lookup, dense_layer_forward, compute_softmax, apply_behavioral_bias
 from tensor_manager import dispose_tensor
-from tokenizer import normalize_text, tokenize_line, decode_sequence
+from vocab import serialize, deserialize
 
 def apply_temperature(logits, temperature):
     """Ajusta os logits com base na temperatura."""
@@ -58,9 +58,8 @@ def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_o
     """
     Gera uma sequência de texto auto-regressiva com detecção de Stop Tokens e Viés.
     """
-    # Tokenização do prompt
-    tokens = tokenize_line(normalize_text(prompt))
-    token_ids = [get_or_create_id(t) for t in tokens]
+    # Tokenização do prompt (Serialização com Assimilação)
+    token_ids = serialize(prompt)
     
     # IDs de Stop Tokens comuns
     stop_words = {'.', '!', '?', '<PAD>'}
@@ -84,15 +83,14 @@ def generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_o
             if token_text in stop_words:
                 break
         
-    return decode_sequence(generated_ids)
+    return deserialize(generated_ids)
 
 def stream_generate_text(prompt, max_new_tokens=10, temperature=1.0, top_k=None, stop_on_punctuation=True, bias_name=None):
     """
     Gerador que retorna tokens um a um em tempo real (Streaming).
     """
-    # Tokenização do prompt
-    tokens = tokenize_line(normalize_text(prompt))
-    token_ids = [get_or_create_id(t) for t in tokens]
+    # Tokenização do prompt (Serialização com Assimilação)
+    token_ids = serialize(prompt)
     
     stop_words = {'.', '!', '?', '<PAD>'}
     generated_ids = list(token_ids)

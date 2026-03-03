@@ -4,7 +4,7 @@
         "embedding_matrix": {
             "path": "d:\\Dyson.AI\\app\\weights\\embedding_matrix.npy",
             "shape": [
-                53776,
+                53779,
                 128
             ],
             "dtype": "float32"
@@ -28,7 +28,7 @@
             "path": "d:\\Dyson.AI\\app\\weights\\output_weights.npy",
             "shape": [
                 256,
-                53776
+                53779
             ],
             "dtype": "float32"
         }

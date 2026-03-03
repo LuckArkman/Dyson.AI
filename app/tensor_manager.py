@@ -35,7 +35,7 @@ def is_layer_frozen(name: str) -> bool:
 def expand_tensor_if_needed(name: str, new_vocab_size: int) -> None:
     """
     Expande um tensor (Embedding ou Output) para acomodar um novo tamanho de vocabulário.
-    Preserva os pesos existentes e preenche os novos com inicialização aleatória.
+    Suporta tensores FP32, FP16, INT8 e INT4.
     """
     meta = get_layer_metadata(name)
     if not meta:
@@ -57,25 +57,51 @@ def expand_tensor_if_needed(name: str, new_vocab_size: int) -> None:
 
     print(f"[EXPAND] Expandindo '{name}': {current_shape[axis_to_expand]} -> {new_vocab_size}")
     
-    # 1. Carregar pesos antigos
-    old_weights = np.load(meta['path'])
+    # 1. Carregar e Dequantizar se necessário
+    if meta.get('quantized'):
+        # Tentar obter parâmetros do meta carregado, senão do arquivo .meta
+        scale = meta.get('scale')
+        zp = meta.get('zero_point')
+        
+        if scale is None or zp is None:
+            q_params = get_quant_params(name)
+            if q_params:
+                scale = q_params['scale']
+                zp = q_params['zero_point']
+            else:
+                raise ValueError(f"Parâmetros de quantização para '{name}' não encontrados.")
+        
+        if meta.get('quantized') == "int4":
+            packed = np.load(meta['path'])
+            weights = dequantize_from_int4(packed, tuple(meta['shape']), scale, zp)
+        else: # int8
+            q_tensor = np.load(meta['path'])
+            weights = dequantize_from_int8(q_tensor, scale, zp)
+    else:
+        weights = np.load(meta['path'])
     
-    # 2. Criar novo shape
+    # 2. Criar novo shape e inicializar novos pesos
     new_shape = list(current_shape)
     new_shape[axis_to_expand] = new_vocab_size
     
-    # 3. Inicializar novos pesos
-    new_weights = np.random.randn(*new_shape).astype(old_weights.dtype) * 0.01
+    # Inicialização aleatória para os novos tokens
+    new_weights = np.random.randn(*new_shape).astype(np.float32) * 0.01
     
-    # 4. Copiar pesos antigos para o novo tensor
+    # 3. Copiar pesos antigos para o novo tensor
     slices = [slice(0, s) for s in current_shape]
-    new_weights[tuple(slices)] = old_weights
+    new_weights[tuple(slices)] = weights
     
-    # 5. Salvar e atualizar registro
-    np.save(meta['path'], new_weights)
+    # 4. Salvar de acordo com o formato original ou converter
+    if meta.get('quantized') == "int4":
+        save_quantized_int4_tensor(name, new_weights)
+    elif meta.get('quantized') == "int8":
+        save_quantized_tensor(name, new_weights)
+    else:
+        np.save(meta['path'], new_weights.astype(weights.dtype))
+        
     meta['shape'] = list(new_weights.shape)
     
-    # Atualizar registro global
+    # 5. Atualizar registro global
     with open(REGISTRY_PATH, 'r') as f:
         registry = json.load(f)
     registry['layers'][name] = meta
@@ -87,11 +113,12 @@ def expand_tensor_if_needed(name: str, new_vocab_size: int) -> None:
         optim_path = os.path.join(WEIGHTS_DIR, 'optim', f"{name}{suffix}.npy")
         if os.path.exists(optim_path):
             old_optim = np.load(optim_path)
+            # Expandir estados com zeros (novo aprendizado)
             new_optim = np.zeros(new_shape, dtype=old_optim.dtype)
             new_optim[tuple(slices)] = old_optim
             np.save(optim_path, new_optim)
             
-    print(f"[OK] Camada '{name}' expandida.")
+    print(f"[OK] Camada '{name}' expandida com sucesso.")
 
 def sync_model_to_vocab() -> None:
     """Sincroniza as dimensões do modelo com o tamanho atual do vocabulário no SQLite."""
@@ -181,6 +208,51 @@ def dispose_tensor(tensor_obj: Any) -> None:
     if tensor_obj is not None:
         del tensor_obj
 
+def load_trained_weight(name: str) -> np.ndarray:
+    """
+    Carrega um peso do modelo, dequantizando automaticamente se necessário.
+    Útil para o loop de treinamento onde precisamos dos pesos em Float.
+    """
+    meta = get_layer_metadata(name)
+    if not meta:
+        raise ValueError(f"Peso '{name}' não encontrado no registro.")
+        
+    path = meta['path']
+    # Se o caminho no registro for absoluto para outro drive, tentar ajustar para o local
+    if not os.path.exists(path):
+        filename = os.path.basename(path)
+        path = os.path.join(WEIGHTS_DIR, filename)
+        
+    if meta.get('quantized'):
+        q_params = get_quant_params(name)
+        if meta['quantized'] == "int4":
+            packed = np.load(path)
+            return dequantize_from_int4(packed, tuple(meta['shape']), q_params['scale'], q_params['zero_point'])
+        else: # int8
+            q_tensor = np.load(path)
+            return dequantize_from_int8(q_tensor, q_params['scale'], q_params['zero_point'])
+    
+    return np.load(path)
+
+def save_trained_weight(name: str, tensor: np.ndarray) -> None:
+    """
+    Salva um peso após a atualização do otimizador.
+    Mantém o formato original (Quantizado ou Float).
+    """
+    meta = get_layer_metadata(name)
+    if not meta:
+        # Se for novo, salva como float por padrão
+        path = os.path.join(WEIGHTS_DIR, f"{name}.npy")
+        np.save(path, tensor)
+        return
+
+    if meta.get('quantized') == "int4":
+        save_quantized_int4_tensor(name, tensor)
+    elif meta.get('quantized') == "int8":
+        save_quantized_tensor(name, tensor)
+    else:
+        np.save(meta['path'], tensor.astype(np.float32))
+
 def store_bias_vector(name: str, vector: np.ndarray, description: str = "") -> None:
     """Salva um vetor de viés comportamental e registra no banco de dados."""
     path = os.path.join(WEIGHTS_DIR, "bias")
@@ -256,7 +328,7 @@ def dequantize_from_int4(packed_tensor: np.ndarray, shape: Tuple[int, ...], scal
     
     # Dequantizar
     q_tensor = unpacked.astype(np.float32) - 8 # Range [-8, 7] corrigindo o shift do pack
-    return ((q_tensor - zero_point) * scale).astype(DEFAULT_DTYPE)
+    return ((q_tensor - zero_point) * scale).astype(DEFAULT_DTYPE).reshape(shape)
 
 def save_quantized_tensor(name: str, tensor: np.ndarray) -> None:
     """Quantiza e salva um tensor no disco acompanhado de seu arquivo .meta."""
@@ -267,17 +339,38 @@ def save_quantized_tensor(name: str, tensor: np.ndarray) -> None:
     
     meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
     with open(meta_path, 'w') as f:
-        json.dump({"scale": scale, "zero_point": zp, "quantized": True}, f)
+        json.dump({"scale": float(scale), "zero_point": float(zp), "quantized": True}, f)
         
     print(f"[QUANT] '{name}' salvo como INT8 (Scale: {scale:.6f})")
 
+def save_quantized_int4_tensor(name: str, tensor: np.ndarray) -> None:
+    """Quantiza em 4 bits e salva no disco com metadados."""
+    packed, scale, zp = quantize_to_int4(tensor)
+    
+    path = os.path.join(WEIGHTS_DIR, f"{name}_int4.npy")
+    np.save(path, packed)
+    
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
+    with open(meta_path, 'w') as f:
+        json.dump({
+            "scale": float(scale), 
+            "zero_point": int(zp), 
+            "quantized": "int4",
+            "shape": list(tensor.shape)
+        }, f)
+        
+    print(f"[QUANT] '{name}' salvo como INT4 (Scale: {scale:.6f})")
+
 def get_quant_params(name: str) -> Optional[Dict[str, Any]]:
-    """Recupera metadados de quantização (.meta) de uma camada."""
+    """Recupera metadados de quantização do arquivo .meta ou do registro global."""
+    # 1. Tentar arquivo .meta
     meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
     if os.path.exists(meta_path):
         with open(meta_path, 'r') as f:
             return json.load(f)
-    return None
+    
+    # 2. Tentar registro global
+    return get_layer_metadata(name)
 
 def store_tensor_disk(name: str, tensor: np.ndarray, folder: str = 'temp', quantize: bool = False) -> str:
     """Salva um tensor (gradiente ou ativação) no disco, opcionalmente quantizado."""

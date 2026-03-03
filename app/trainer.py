@@ -1,9 +1,12 @@
 import os
+import psutil
+import shutil
 import numpy as np
-from database_manager import get_db_connection, log_training_metrics
+from database_manager import get_db_connection, log_training_metrics, log_telemetry
 from tensor_manager import (
     load_tensor_disk, store_tensor_disk, dispose_tensor, 
-    get_layer_metadata, load_tensor_mmap, save_tensor_logged
+    get_layer_metadata, load_tensor_mmap, save_tensor_logged,
+    load_trained_weight, save_trained_weight
 )
 from engine import (
     embedding_lookup, dense_layer_forward, apply_activation,
@@ -11,9 +14,7 @@ from engine import (
     backward_layer_step, d_relu, accumulate_embedding_grad
 )
 from optimizer import increment_training_step, adam_update_step
-import psutil
-from database_manager import log_telemetry, get_db_connection
-import shutil
+from vocab import serialize, deserialize
 
 def train_step(X_batch, Y_batch):
     """Executa um único passo de treinamento (Forward -> Backward -> Update)."""
@@ -69,22 +70,19 @@ def train_step(X_batch, Y_batch):
     log_telemetry('ram_usage_mb', ram_mb)
     
     # Atualizar Output Weights
-    meta_out = get_layer_metadata("output_weights")
-    w_out = np.load(meta_out['path'])
+    w_out = load_trained_weight("output_weights")
     new_w_out = adam_update_step("output_weights", w_out, grad_w_out)
-    save_tensor_logged(meta_out['path'], new_w_out, "output_weights")
+    save_trained_weight("output_weights", new_w_out)
     
     # Atualizar Hidden Weights
-    meta_h1 = get_layer_metadata("hidden_01_weights")
-    w_h1 = np.load(meta_h1['path'])
+    w_h1 = load_trained_weight("hidden_01_weights")
     new_w_h1 = adam_update_step("hidden_01_weights", w_h1, grad_w_h1)
-    save_tensor_logged(meta_h1['path'], new_w_h1, "hidden_01_weights")
+    save_trained_weight("hidden_01_weights", new_w_h1)
     
     # Atualizar Bias
-    meta_b1 = get_layer_metadata("hidden_01_bias")
-    b1 = np.load(meta_b1['path'])
+    b1 = load_trained_weight("hidden_01_bias")
     new_b1 = adam_update_step("hidden_01_bias", b1, grad_b_h1)
-    save_tensor_logged(meta_b1['path'], new_b1, "hidden_01_bias")
+    save_trained_weight("hidden_01_bias", new_b1)
     
     # Limpeza
     dispose_tensor(emb); dispose_tensor(h1_z); dispose_tensor(h1_act)
@@ -159,7 +157,7 @@ def run_training_session(data_path, batch_size=4, seq_length=8, epochs=1, steps_
     """
     Orquestra uma sessão completa de treinamento com suporte a múltiplas épocas e early stopping.
     """
-    from tokenizer import sequence_generator
+    from vocab import sequence_generator
     
     epoch_start, batch_start = load_training_checkpoint()
     print(f"\n>>> Iniciando Sessão de Treino: Época {epoch_start} a {epoch_start + epochs}")

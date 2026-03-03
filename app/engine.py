@@ -5,7 +5,7 @@ from tensor_manager import (
 )
 import numpy as np
 import os
-from typing import List, Optional, Any, Union
+from typing import List, Optional, Any, Union, Tuple
 
 def relu(x: np.ndarray) -> np.ndarray:
     """Função de Ativação ReLU (Rectified Linear Unit)."""
@@ -54,20 +54,27 @@ def embedding_lookup(token_ids: Union[List[int], np.ndarray]) -> np.ndarray:
     Returns:
         np.ndarray: Matriz de vetores brutos (ou dequantizados).
     """
-    if not token_ids or len(token_ids) == 0:
+    if token_ids is None or len(token_ids) == 0:
         return np.zeros((1, 128), dtype=np.float32)
 
     # 1. Tentar buscar via Sharding
-    first_shard_info = lookup_shard_for_id("embedding_matrix", token_ids[0])
+    token_ids_flat = np.array(token_ids).flatten()
+    if len(token_ids_flat) == 0: return np.zeros((1, 128))
+    
+    first_shard_info = lookup_shard_for_id("embedding_matrix", int(token_ids_flat[0]))
     
     if first_shard_info:
         all_vectors = []
-        for tid in token_ids:
-            shard_path, internal_idx = lookup_shard_for_id("embedding_matrix", tid)
+        for tid in token_ids_flat:
+            shard_path, internal_idx = lookup_shard_for_id("embedding_matrix", int(tid))
             shard_data = np.load(shard_path, mmap_mode='r')
             all_vectors.append(shard_data[internal_idx].copy())
             dispose_tensor(shard_data)
-        vectors = np.array(all_vectors)
+        
+        # Restaurar shape
+        vectors_flat = np.array(all_vectors)
+        final_shape = list(np.array(token_ids).shape) + [128] # Presume dim 128 se não meta
+        vectors = vectors_flat.reshape(final_shape)
     else:
         embed_matrix = load_tensor_mmap("embedding_matrix")
         vectors = embed_matrix[token_ids]
@@ -88,19 +95,24 @@ def embedding_lookup(token_ids: Union[List[int], np.ndarray]) -> np.ndarray:
             orig_shape = q_params['shape']
             dim = orig_shape[1]
             
+            # Trabalhar com versão achatada para suportar ND arrays (Batches)
+            token_ids_flat = np.array(token_ids).flatten()
+            
             all_vectors = []
-            for tid in token_ids:
-                start_byte = (tid * dim) // 2
-                end_byte = ((tid + 1) * dim + 1) // 2
+            for tid in token_ids_flat:
+                # Localizar bytes no tensor achatado
+                start_byte = (int(tid) * dim) // 2
+                end_byte = ((int(tid) + 1) * dim + 1) // 2 # +1 por segurança (padding)
                 packed_row = embed_matrix_packed[start_byte:end_byte]
                 unpacked_row = dequantize_from_int4(packed_row, (dim,), q_params['scale'], q_params['zero_point'])
                 all_vectors.append(unpacked_row[:dim])
             
-            vectors = np.array(all_vectors)
-            if vectors.ndim == 1:
-                vectors = vectors[np.newaxis, :]
+            # Montar e Restaurar Shape original (ex: batch, seq, dim)
+            vectors_flat = np.array(all_vectors)
+            final_shape = list(np.array(token_ids).shape) + [dim]
+            vectors = vectors_flat.reshape(final_shape)
             
-            print(f"[DEBUG] INT4 Embedding vectors shape: {vectors.shape} | Token IDs: {token_ids}")
+            # print(f"[DEBUG] INT4 Embedding vectors shape: {vectors.shape}")
             dispose_tensor(embed_matrix_packed)
         else:
             vectors = dequantize_from_int8(vectors, q_params['scale'], q_params['zero_point'])
@@ -221,12 +233,17 @@ def backward_layer_step(dout: np.ndarray, weights_name: str, input_tensor: np.nd
     """
     Versão compatível para o trainer.py que retorna todos os gradientes de uma vez.
     """
-    from tensor_manager import load_tensor_mmap, dispose_tensor
-    weights = load_tensor_mmap(weights_name)
+    from tensor_manager import load_trained_weight, dispose_tensor
+    weights = load_trained_weight(weights_name) # Já dequantiza se necessário
     
-    dw = np.dot(input_tensor.T, dout)
-    db = np.sum(dout, axis=0)
-    din = np.dot(dout, weights.T)
+    # Garantir que shapes batem para dot product
+    # Se input_tensor é (batch, hidden) e dout é (batch, vocab)
+    # dw = input_tensor.T @ dout -> (hidden, batch) @ (batch, vocab) = (hidden, vocab)
+    dw = np.dot(input_tensor.reshape(-1, input_tensor.shape[-1]).T, 
+                dout.reshape(-1, dout.shape[-1]))
+    
+    db = np.sum(dout.reshape(-1, dout.shape[-1]), axis=0)
+    din = np.dot(dout, weights.T) # (batch, vocab) @ (vocab, hidden) = (batch, hidden)
     
     dispose_tensor(weights)
     return dw, db, din
@@ -292,8 +309,12 @@ def accumulate_embedding_grad(grad_emb: np.ndarray, token_ids: np.ndarray, weigh
         existing_grad = np.zeros(meta['shape'], dtype=np.float32)
     
     # Acumular gradientes apenas para os IDs que estiveram no batch
-    # grad_emb: (batch, dim), token_ids: (batch,)
-    for i, tid in enumerate(token_ids):
-        existing_grad[tid] += grad_emb[i]
+    # grad_emb: (batch, seq, dim), token_ids: (batch, seq)
+    # Achatamos para processar todos os tokens sequencialmente
+    grad_emb_flat = grad_emb.reshape(-1, grad_emb.shape[-1])
+    token_ids_flat = token_ids.flatten()
+    
+    for i, tid in enumerate(token_ids_flat):
+        existing_grad[int(tid)] += grad_emb_flat[i]
         
     store_tensor_disk(f"{weights_name}_dw", existing_grad, folder='grads')

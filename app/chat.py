@@ -4,7 +4,7 @@ import time
 from database_manager import init_db, get_text_by_id, get_or_create_id
 from tensor_manager import ensure_v0_weights, REGISTRY_PATH
 from inference import generate_text, predict_next_token
-from tokenizer import normalize_text, tokenize_line, decode_sequence
+from vocab import serialize, deserialize
 
 def print_slow(text, delay=0.05):
     """Simula digitação para a resposta do robô."""
@@ -42,9 +42,8 @@ def chat_loop():
                 print("[Contexto Resetado]")
                 continue
             
-            # 1. Processar Input
-            tokens = tokenize_line(normalize_text(user_input))
-            input_ids = [get_or_create_id(t) for t in tokens]
+            # 1. Processar Input (Serialização com Assimilação)
+            input_ids = serialize(user_input)
             context_ids.extend(input_ids)
             
             # Limitar contexto (últimos 16 tokens para estabilidade inicial)
