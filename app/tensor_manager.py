@@ -106,6 +106,50 @@ def initialize_default_biases(embed_dim=128):
     technical = np.zeros(embed_dim).astype(np.float16)
     store_bias_vector("technical", technical, "Mantém o comportamento padrão estável.")
 
+def quantize_to_int8(tensor):
+    """Converte um tensor FP32/FP16 para INT8 com escala e zero_point."""
+    tensor = tensor.astype(np.float32)
+    t_min, t_max = np.min(tensor), np.max(tensor)
+    
+    # Scale: mapear o range original para [-128, 127]
+    # Range INT8 = 255
+    scale = (t_max - t_min) / 255.0 if t_max != t_min else 1.0
+    zero_point = -t_min / scale - 128 if scale != 0 else 0
+    
+    # Mapear e clipar
+    q_tensor = np.round(tensor / scale + zero_point).clip(-128, 127).astype(np.int8)
+    
+    return q_tensor, float(scale), float(zero_point)
+
+def dequantize_from_int8(q_tensor, scale, zero_point):
+    """Restaura o tensor para float usando escala e zero_point."""
+    return ((q_tensor.astype(np.float32) - zero_point) * scale).astype(DEFAULT_DTYPE)
+
+def save_quantized_tensor(name, tensor):
+    """Quantiza e salva um tensor no disco com metadados de escala."""
+    q_tensor, scale, zp = quantize_to_int8(tensor)
+    
+    # Salvar tensor INT8
+    path = os.path.join(WEIGHTS_DIR, f"{name}_int8.npy")
+    np.save(path, q_tensor)
+    
+    # Salvar metadados de escala (em um arquivo JSON pequeno ou via banco)
+    # Para simplicidade agora, vamos usar um arquivo .meta
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
+    import json
+    with open(meta_path, 'w') as f:
+        json.dump({"scale": scale, "zero_point": zp, "quantized": True}, f)
+        
+    print(f"[QUANT] '{name}' salvo como INT8 (Scale: {scale:.6f})")
+
+def get_quant_params(name):
+    """Recupera metadados de quantização de uma camada."""
+    meta_path = os.path.join(WEIGHTS_DIR, f"{name}.meta")
+    if os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            return json.load(f)
+    return None
+
 def store_tensor_disk(name, tensor, folder='temp'):
     """Salva um tensor temporário (gradiente ou ativação) no disco."""
     path = os.path.join(WEIGHTS_DIR, folder)
@@ -175,6 +219,10 @@ def ensure_v0_weights():
         create_weight_registry(layers_metadata)
         print("[OK] Pesos reinicializados.")
 
+# Configuração de Precisão (Sprint 12: FP16, Sprint 31: INT8)
+DEFAULT_DTYPE = np.float16 
+USE_INT8 = True # Habilitar quantização experimental
+
 def convert_weights_to_fp16():
     """Converte todos os pesos do modelo e estados do otimizador para FP16 para economizar I/O."""
     print("\nIniciando conversão para FP16 (Otimização da Sprint 15)...")
@@ -206,3 +254,33 @@ def convert_weights_to_fp16():
     with open(REGISTRY_PATH, 'w') as f:
         json.dump(registry, f, indent=4)
     print("[OK] Conversão para FP16 concluída.")
+
+def convert_weights_to_int8():
+    """Converte todos os pesos do modelo para INT8 (Quantização da Sprint 31)."""
+    print("\nIniciando Quantização INT8 (Sprint 31)...")
+    if not os.path.exists(REGISTRY_PATH):
+        print("Registro não encontrado.")
+        return
+
+    with open(REGISTRY_PATH, 'r') as f:
+        registry = json.load(f)
+
+    for name, meta in registry['layers'].items():
+        path = meta['path']
+        if os.path.exists(path):
+            tensor = np.load(path)
+            print(f" -> Quantizando {name} ({tensor.dtype} -> int8)")
+            
+            # Salvar como quantized
+            save_quantized_tensor(name, tensor)
+            
+            # Atualizar registro para apontar para o arquivo int8
+            meta['path'] = os.path.join(WEIGHTS_DIR, f"{name}_int8.npy")
+            meta['dtype'] = 'int8'
+            meta['quantized'] = True
+            
+            dispose_tensor(tensor)
+    
+    with open(REGISTRY_PATH, 'w') as f:
+        json.dump(registry, f, indent=4)
+    print("[OK] Quantização INT8 concluída. Model Size reduced by ~50% (base FP16).")
