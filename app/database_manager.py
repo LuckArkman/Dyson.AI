@@ -53,6 +53,15 @@ def init_db():
                 context TEXT
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conv_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                session_id TEXT,
+                role TEXT,
+                message TEXT
+            )
+        ''')
         # Inserir token <PAD> se não existir
         cursor.execute("INSERT OR IGNORE INTO vocab (id, text) VALUES (0, '<PAD>')")
         conn.commit()

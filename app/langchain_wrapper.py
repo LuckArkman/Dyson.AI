@@ -52,3 +52,13 @@ class ZeroRAMLLM(LLM):
             "top_k": self.top_k,
             "architecture": "Zero RAM"
         }
+
+def init_langchain_wrapper(**kwargs):
+    """
+    Função auxiliar para inicializar o wrapper ZeroRAMLLM.
+    """
+    from database_manager import init_db
+    from tensor_manager import ensure_v0_weights
+    init_db()
+    ensure_v0_weights()
+    return ZeroRAMLLM(**kwargs)

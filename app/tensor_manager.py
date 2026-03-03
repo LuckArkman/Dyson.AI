@@ -72,11 +72,10 @@ def load_tensor_mmap(name):
     return tensor
 
 def dispose_tensor(tensor_obj):
-    """Remove o objeto da RAM e força a coleta de lixo."""
-    import gc
-    # Nota: Em Python, del remove a referência. O GC limpa o espaço.
-    del tensor_obj
-    gc.collect()
+    """Remove o objeto da RAM. O GC fará a limpeza automática conforme necessário."""
+    # Nota: gc.collect() em cada descarte é extremamente lento (Sprint 22 optimization)
+    if tensor_obj is not None:
+        del tensor_obj
 
 def store_tensor_disk(name, tensor, folder='temp'):
     """Salva um tensor temporário (gradiente ou ativação) no disco."""
