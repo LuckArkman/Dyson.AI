@@ -195,3 +195,30 @@ def run_training_session(data_path, batch_size=4, seq_length=8, epochs=1, steps_
         
         print(f"\nÉpoca {epoch} Concluída. Loss Média Estimada: {epoch_loss/current_step:.4f}")
         save_training_checkpoint(epoch + 1, 0) # Reinicia batch para próxima época
+def run_distillation_training(batch_size=4, seq_length=8, epochs=1):
+    """
+    Treina o modelo baseado nos dados "Dourados" (Gold Data) da destilação.
+    """
+    from vocab import gold_data_generator
+    
+    print("\n>>> Iniciando Treinamento por Destilação (Refinamento) <<<")
+    
+    for epoch in range(epochs):
+        print(f"\n--- Época Destilação {epoch} ---")
+        gen = gold_data_generator(batch_size, seq_length)
+        
+        current_step = 0
+        epoch_loss = 0
+        
+        for X, Y in gen:
+            current_step += 1
+            loss, t = train_step(X, Y)
+            epoch_loss += loss
+            
+            if current_step % 5 == 0:
+                print(f" [Distill Step {current_step}] Loss: {loss:.4f} | T: {t}")
+        
+        if current_step > 0:
+            print(f"\nÉpoca Destilação {epoch} Concluída. Loss Média: {epoch_loss/current_step:.4f}")
+        else:
+            print("[!] Aviso: Nenhum dado dourado encontrado para treino.")

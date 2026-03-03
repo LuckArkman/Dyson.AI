@@ -116,6 +116,32 @@ def serialize_iterator(data_path):
             
         yield tid
 
+def gold_data_generator(batch_size, seq_length):
+    """Gera batches a partir da tabela gold_data no SQLite."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT completion FROM gold_data")
+        rows = cursor.fetchall()
+    
+    tokens = []
+    for row in rows:
+        text = row[0]
+        # Serializar o texto (com assimilação se necessário)
+        tids = serialize(text)
+        tokens.extend(tids)
+        
+        while len(tokens) >= batch_size * seq_length + 1:
+            X = []
+            Y = []
+            for i in range(batch_size):
+                start = i * seq_length
+                end = start + seq_length
+                X.append(tokens[start:end])
+                Y.append(tokens[end])
+            
+            yield np.array(X), np.array(Y)
+            tokens = tokens[batch_size * seq_length:]
+
 if __name__ == "__main__":
     # Teste de Assimilação
     test_text = "DysonAI é um sistema inovador de ZeroRAM."
