@@ -166,3 +166,45 @@ def compute_loss(probs: np.ndarray, target_ids: np.ndarray) -> float:
     target_probs = probs[np.arange(batch_size), target_ids]
     loss: float = -np.mean(np.log(target_probs))
     return loss
+
+def dense_layer_backward(dout: np.ndarray, input_tensor: np.ndarray, weights_name: str) -> np.ndarray:
+    """
+    Backpropagation para uma camada densa (Zero RAM).
+    Calcula os gradientes e os armazena no disco para posterior atualização.
+    
+    Args:
+        dout: Gradiente vindo da camada posterior.
+        input_tensor: Ativação salva do passo Forward.
+        weights_name: Nome da camada para identificação de pesos.
+        
+    Returns:
+        np.ndarray: Gradiente (din) para retropropagar para a camada anterior.
+    """
+    from tensor_manager import store_tensor_disk, is_layer_frozen
+    
+    # 0. Verificar se a camada está congelada (Fine-tuning)
+    if is_layer_frozen(weights_name):
+        weights = load_tensor_mmap(weights_name)
+        din = np.dot(dout, weights.T)
+        dispose_tensor(weights)
+        return din
+
+    # 1. Carregar pesos para cálculo de din
+    weights = load_tensor_mmap(weights_name)
+    
+    # 2. Calcular Gradientes (dw = x^T * dout, db = sum(dout))
+    # Para batch size > 1, usamos dot product. x deve ter shape (batch, in), dout (batch, out)
+    dw = np.dot(input_tensor.T, dout)
+    db = np.sum(dout, axis=0)
+    
+    # 3. Calcular Gradiente de Entrada (din = dout * w^T)
+    din = np.dot(dout, weights.T)
+    
+    # 4. Persistir Gradientes (Zero RAM - Escrita Direta no Disco)
+    store_tensor_disk(f"{weights_name}_dw", dw, folder='grads')
+    store_tensor_disk(f"{weights_name}_db", db, folder='grads')
+    
+    # 5. Liberar RAM
+    dispose_tensor(weights)
+    
+    return din
