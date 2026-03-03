@@ -1,7 +1,7 @@
 import os
 import time
 from database_manager import init_db, get_db_connection
-from tensor_manager import ensure_v0_weights
+from tensor_manager import ensure_v0_weights, reset_accumulated_grads
 from tokenizer import sequence_generator
 from trainer import train_step
 
@@ -11,6 +11,12 @@ def main():
     # 0. Setup
     init_db()
     ensure_v0_weights()
+    reset_accumulated_grads()
+    
+    # Limpar telemetria antiga
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM telemetry")
+        conn.commit()
     
     # 1. Parâmetros
     base_dir = os.path.dirname(__file__)
@@ -22,7 +28,7 @@ def main():
     print("\nExecutando Ciclo de Treino com Coleta de Telemetria...")
     gen = sequence_generator(data_path, batch_size, seq_length)
     
-    for i in range(3):
+    for i in range(2):
         X, Y = next(gen)
         loss, t = train_step(X, Y)
         print(f" [Step {i+1}] Loss: {loss:.4f}")
@@ -32,24 +38,26 @@ def main():
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # Latência de I/O
-        cursor.execute("SELECT AVG(value) FROM telemetry WHERE metric_name = 'io_read_latency'")
-        avg_read = cursor.fetchone()[0]
-        print(f" - Latência Média de Leitura (I/O): {avg_read:.6f}s")
+        metrics = [
+            ('io_read_latency', 'Latência Média de Leitura (I/O)', '{:.6f}s'),
+            ('io_write_latency', 'Latência Média de Escrita (I/O)', '{:.6f}s'),
+            ('ram_usage_mb', 'Pico de RAM Detectado', '{:.2f} MB'),
+            ('grad_norm', 'Última Magnitude de Gradiente', '{:.8f}')
+        ]
         
-        cursor.execute("SELECT AVG(value) FROM telemetry WHERE metric_name = 'io_write_latency'")
-        avg_write = cursor.fetchone()[0]
-        print(f" - Latência Média de Escrita (I/O): {avg_write:.6f}s")
-        
-        # RAM
-        cursor.execute("SELECT MAX(value) FROM telemetry WHERE metric_name = 'ram_usage_mb'")
-        max_ram = cursor.fetchone()[0]
-        print(f" - Pico de RAM Detectado: {max_ram:.2f} MB")
-        
-        # Gradientes
-        cursor.execute("SELECT value FROM telemetry WHERE metric_name = 'grad_norm' ORDER BY timestamp DESC LIMIT 1")
-        last_grad = cursor.fetchone()[0]
-        print(f" - Última Magnitude de Gradiente: {last_grad:.8f}")
+        for metric_id, label, fmt in metrics:
+            if metric_id == 'ram_usage_mb':
+                cursor.execute(f"SELECT MAX(value) FROM telemetry WHERE metric_name = '{metric_id}'")
+            elif metric_id == 'grad_norm':
+                cursor.execute(f"SELECT value FROM telemetry WHERE metric_name = '{metric_id}' ORDER BY timestamp DESC LIMIT 1")
+            else:
+                cursor.execute(f"SELECT AVG(value) FROM telemetry WHERE metric_name = '{metric_id}'")
+                
+            val = cursor.fetchone()[0]
+            if val is not None:
+                print(f" - {label}: " + fmt.format(val))
+            else:
+                print(f" - {label}: [Dados não encontrados]")
 
     print("\nSprint 14 Concluída com Sucesso: Telemetria integrada e validada.")
 

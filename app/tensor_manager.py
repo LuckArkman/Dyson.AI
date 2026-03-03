@@ -32,6 +32,13 @@ def initialize_layer_weights(shape, name, init_type='xavier'):
     log_telemetry('io_write_latency', latency, f"layer:{name}")
     return file_path, weights.shape
 
+def save_tensor_logged(path, tensor, name="unknown"):
+    """Salva um tensor no disco registrando a latência de escrita."""
+    start_time = time.time()
+    np.save(path, tensor)
+    latency = time.time() - start_time
+    log_telemetry('io_write_latency', latency, f"file:{name}")
+
 def create_weight_registry(layers_info):
     """Cria um registro JSON com os metadados de todos os tensores."""
     ensure_weights_dir()
@@ -76,7 +83,10 @@ def store_tensor_disk(name, tensor, folder='temp'):
     path = os.path.join(WEIGHTS_DIR, folder)
     os.makedirs(path, exist_ok=True)
     file_path = os.path.join(path, f"{name}.npy")
+    start_time = time.time()
     np.save(file_path, tensor)
+    latency = time.time() - start_time
+    log_telemetry('io_write_latency', latency, f"temp:{name}")
     return file_path
 
 def load_tensor_disk(name, folder='temp'):
@@ -84,7 +94,11 @@ def load_tensor_disk(name, folder='temp'):
     file_path = os.path.join(WEIGHTS_DIR, folder, f"{name}.npy")
     if not os.path.exists(file_path):
         return None
-    return np.load(file_path)
+    start_time = time.time()
+    tensor = np.load(file_path)
+    latency = time.time() - start_time
+    log_telemetry('io_read_latency', latency, f"temp_load:{name}")
+    return tensor
 
 def reset_accumulated_grads():
     """Remove todos os gradientes temporários do disco."""

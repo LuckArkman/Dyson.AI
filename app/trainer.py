@@ -3,7 +3,7 @@ import numpy as np
 from database_manager import get_db_connection, log_training_metrics
 from tensor_manager import (
     load_tensor_disk, store_tensor_disk, dispose_tensor, 
-    get_layer_metadata, load_tensor_mmap
+    get_layer_metadata, load_tensor_mmap, save_tensor_logged
 )
 from engine import (
     embedding_lookup, dense_layer_forward, apply_activation,
@@ -68,19 +68,19 @@ def train_step(X_batch, Y_batch):
     meta_out = get_layer_metadata("output_weights")
     w_out = np.load(meta_out['path'])
     new_w_out = adam_update_step("output_weights", w_out, grad_w_out)
-    np.save(meta_out['path'], new_w_out)
+    save_tensor_logged(meta_out['path'], new_w_out, "output_weights")
     
     # Atualizar Hidden Weights
     meta_h1 = get_layer_metadata("hidden_01_weights")
     w_h1 = np.load(meta_h1['path'])
     new_w_h1 = adam_update_step("hidden_01_weights", w_h1, grad_w_h1)
-    np.save(meta_h1['path'], new_w_h1)
+    save_tensor_logged(meta_h1['path'], new_w_h1, "hidden_01_weights")
     
     # Atualizar Bias
     meta_b1 = get_layer_metadata("hidden_01_bias")
     b1 = np.load(meta_b1['path'])
     new_b1 = adam_update_step("hidden_01_bias", b1, grad_b_h1)
-    np.save(meta_b1['path'], new_b1)
+    save_tensor_logged(meta_b1['path'], new_b1, "hidden_01_bias")
     
     # Limpeza
     dispose_tensor(emb); dispose_tensor(h1_z); dispose_tensor(h1_act)
