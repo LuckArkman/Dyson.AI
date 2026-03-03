@@ -1,0 +1,42 @@
+{
+    "model_name": "ZeroRAM-GEN-V0",
+    "layers": {
+        "embedding_matrix": {
+            "path": "d:\\Dyson.AI\\app\\weights\\embedding_matrix.int4.npy",
+            "shape": [
+                53776,
+                128
+            ],
+            "dtype": "float32",
+            "quantized": "int4",
+            "scale": 0.023566216230392456,
+            "zero_point": 0
+        },
+        "hidden_01_weights": {
+            "path": "d:\\Dyson.AI\\app\\weights\\hidden_01_weights.npy",
+            "shape": [
+                128,
+                256
+            ],
+            "dtype": "float32"
+        },
+        "hidden_01_bias": {
+            "path": "d:\\Dyson.AI\\app\\weights\\hidden_01_bias.npy",
+            "shape": [
+                256
+            ],
+            "dtype": "float32"
+        },
+        "output_weights": {
+            "path": "d:\\Dyson.AI\\app\\weights\\output_weights.int4.npy",
+            "shape": [
+                256,
+                53776
+            ],
+            "dtype": "float32",
+            "quantized": "int4",
+            "scale": 0.02222447842359543,
+            "zero_point": 0
+        }
+    }
+}

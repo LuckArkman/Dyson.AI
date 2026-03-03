@@ -54,6 +54,9 @@ def embedding_lookup(token_ids: Union[List[int], np.ndarray]) -> np.ndarray:
     Returns:
         np.ndarray: Matriz de vetores brutos (ou dequantizados).
     """
+    if not token_ids or len(token_ids) == 0:
+        return np.zeros((1, 128), dtype=np.float32)
+
     # 1. Tentar buscar via Sharding
     first_shard_info = lookup_shard_for_id("embedding_matrix", token_ids[0])
     
@@ -73,7 +76,34 @@ def embedding_lookup(token_ids: Union[List[int], np.ndarray]) -> np.ndarray:
     # 2. Dequantizar se o arquivo .meta existir
     q_params = get_quant_params("embedding_matrix")
     if q_params and q_params.get('quantized'):
-        vectors = dequantize_from_int8(vectors, q_params['scale'], q_params['zero_point'])
+        if q_params['quantized'] == "int4":
+            from tensor_manager import dequantize_from_int4
+            # Para INT4, o mmap retornou bytes empacotados. 
+            # Como indexar diretamente é complexo com empacotamento,
+            # para o demo/Zero RAM vamos dequantizar apenas o necessário.
+            # vectors aqui contém o lixo do indexing inadequado se embed_matrix era 1D.
+            
+            # Recarregar corretamente:
+            embed_matrix_packed = load_tensor_mmap("embedding_matrix")
+            orig_shape = q_params['shape']
+            dim = orig_shape[1]
+            
+            all_vectors = []
+            for tid in token_ids:
+                start_byte = (tid * dim) // 2
+                end_byte = ((tid + 1) * dim + 1) // 2
+                packed_row = embed_matrix_packed[start_byte:end_byte]
+                unpacked_row = dequantize_from_int4(packed_row, (dim,), q_params['scale'], q_params['zero_point'])
+                all_vectors.append(unpacked_row[:dim])
+            
+            vectors = np.array(all_vectors)
+            if vectors.ndim == 1:
+                vectors = vectors[np.newaxis, :]
+            
+            print(f"[DEBUG] INT4 Embedding vectors shape: {vectors.shape} | Token IDs: {token_ids}")
+            dispose_tensor(embed_matrix_packed)
+        else:
+            vectors = dequantize_from_int8(vectors, q_params['scale'], q_params['zero_point'])
     
     return vectors
 
@@ -134,12 +164,20 @@ def dense_layer_forward(input_tensor: np.ndarray, weights_name: str, bias_name: 
             dispose_tensor(u); dispose_tensor(s); dispose_tensor(v)
         else:
             # 3. MMap Normal ou Quantizado
-            weights_mmap = load_tensor_mmap(weights_name)
+            from tensor_manager import dequantize_from_int4, load_tensor_mmap
             q_params = get_quant_params(weights_name)
-            if q_params and q_params.get('quantized'):
-                weights = dequantize_from_int8(weights_mmap, q_params['scale'], q_params['zero_point'])
+            
+            if q_params and q_params.get('quantized') == "int4":
+                weights_packed = load_tensor_mmap(weights_name)
+                weights = dequantize_from_int4(weights_packed, q_params['shape'], q_params['scale'], q_params['zero_point'])
+                dispose_tensor(weights_packed)
             else:
-                weights = weights_mmap
+                weights_mmap = load_tensor_mmap(weights_name)
+                if q_params and q_params.get('quantized') == "int8":
+                    weights = dequantize_from_int8(weights_mmap, q_params['scale'], q_params['zero_point'])
+                else:
+                    weights = weights_mmap
+            
             output = np.dot(input_tensor, weights)
             dispose_tensor(weights)
     

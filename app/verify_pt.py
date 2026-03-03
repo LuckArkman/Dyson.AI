@@ -8,10 +8,10 @@ import numpy as np
 def verify_pt_finetune():
     print("--- Verificação Fine-tuning Português (v1.1_pt) ---")
     
-    # 1. Carregar Checkpoint PT
-    print("[LOAD] Restaurando Checkpoint 'v1.1_pt'...")
-    if not load_model_checkpoint("v1.1_pt"):
-        print("[ERR] Checkpoint 'v1.1_pt' não encontrado.")
+    # 1. Carregar Checkpoint PT Comprimido
+    print("[LOAD] Restaurando Checkpoint 'v1.2_compressed'...")
+    if not load_model_checkpoint("v1.2_compressed"):
+        print("[ERR] Checkpoint 'v1.2_compressed' não encontrado.")
         return
     
     # 2. Teste de Inferência em PT

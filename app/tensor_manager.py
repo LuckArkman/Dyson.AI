@@ -209,9 +209,54 @@ def quantize_to_int8(tensor: np.ndarray) -> Tuple[np.ndarray, float, float]:
     q_tensor = np.round(tensor_f32 / scale + zero_point).clip(-128, 127).astype(np.int8)
     return q_tensor, float(scale), float(zero_point)
 
-def dequantize_from_int8(q_tensor: np.ndarray, scale: float, zero_point: float) -> np.ndarray:
-    """Restaura um tensor INT8 para ponto flutuante."""
-    return ((q_tensor.astype(np.float32) - zero_point) * scale).astype(DEFAULT_DTYPE)
+def dequantize_from_int8(q_tensor: np.ndarray, scale: float, zero_point: int) -> np.ndarray:
+    """Converte um tensor INT8 de volta para FP32."""
+    return (q_tensor.astype(np.float32) - zero_point) * scale
+
+def quantize_to_int4(tensor: np.ndarray) -> Tuple[np.ndarray, float, int]:
+    """
+    Quantiza um tensor para 4 bits (-8 a 7).
+    Retorna o tensor empacotado (2 valores por byte).
+    """
+    min_val, max_val = tensor.min(), tensor.max()
+    scale = (max_val - min_val) / 15
+    zero_point = int(round(-min_val / scale)) - 8
+    
+    # Quantizar para o range [-8, 7]
+    q_tensor = np.round(tensor / scale + (zero_point + 8)).astype(np.int8) - 8
+    q_tensor = np.clip(q_tensor, -8, 7)
+    
+    # Empacotar (Pack): Cada byte contém dois valores de 4 bits
+    # Deslocamos para [0, 15] para facilitar o shift
+    q_unsigned = (q_tensor + 8).astype(np.uint8)
+    
+    source_flat = q_unsigned.flatten()
+    if len(source_flat) % 2 != 0:
+        source_flat = np.append(source_flat, 0)
+    
+    # Combinar bits: (v1 << 4) | v2
+    packed = (source_flat[::2] << 4) | (source_flat[1::2])
+    
+    return packed, scale, zero_point
+
+def dequantize_from_int4(packed_tensor: np.ndarray, shape: Tuple[int, ...], scale: float, zero_point: int) -> np.ndarray:
+    """
+    Desempacota e dequantiza um tensor INT4.
+    """
+    # Desempacotar (Unpack)
+    v1 = (packed_tensor >> 4).astype(np.int8)
+    v2 = (packed_tensor & 0x0F).astype(np.int8)
+    
+    # Voltar para o range original quantizado [-8, 7]
+    unpacked = np.stack([v1, v2], axis=-1).flatten()
+    
+    # Truncar se houver padding
+    total_elements = np.prod(shape)
+    unpacked = unpacked[:total_elements]
+    
+    # Dequantizar
+    q_tensor = unpacked.astype(np.float32) - 8 # Range [-8, 7] corrigindo o shift do pack
+    return ((q_tensor - zero_point) * scale).astype(DEFAULT_DTYPE)
 
 def save_quantized_tensor(name: str, tensor: np.ndarray) -> None:
     """Quantiza e salva um tensor no disco acompanhado de seu arquivo .meta."""
